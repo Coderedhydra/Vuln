@@ -1,403 +1,138 @@
-# 🎯 VulnHunter
+# VulnHunter - Fast AI-Powered Vulnerability Scanner
 
-## AI-Powered Web Application Vulnerability Scanner
+A fast, accurate vulnerability scanner that uses async parallel requests for speed and confirms vulnerabilities before reporting.
 
-VulnHunter is a sophisticated bug hunting framework that uses Ollama LLM models to find critical security vulnerabilities in web applications. Designed to be **extremely easy for AI models to use** while being powerful enough to find HackerOne-level vulnerabilities.
+## Features
 
-![VulnHunter Banner](https://img.shields.io/badge/Version-1.0.0-blue) ![Python](https://img.shields.io/badge/Python-3.8+-green) ![Ollama](https://img.shields.io/badge/Ollama-Required-orange)
+- **Ultra-Fast Scanning** - Async parallel requests, scans in seconds not minutes
+- **Accurate Detection** - Confirms vulnerabilities with actual exploitation, no false positives
+- **Smart Payloads** - Context-aware payloads that adapt to the target
+- **Data Extraction** - Proves impact by extracting data from confirmed vulnerabilities
+- **AI-Powered** - Optional LLM integration for intelligent hunting (via Ollama)
 
----
-
-## ✨ Features
-
-### 🤖 LLM-First Design
-- **Simple tool interface** for any Ollama model (8B models work great!)
-- **Natural language control** - tell the AI what to find
-- **Automatic tool execution** - the LLM decides what tools to use
-- **Context-aware** - remembers previous findings for deeper analysis
-
-### 🔍 Comprehensive Scanning
-- **XSS** - Reflected, Stored, DOM-based with WAF bypasses
-- **SQL Injection** - Error, Boolean, Time-based, Union attacks
-- **SSRF** - Cloud metadata, internal network, protocol smuggling
-- **LFI/RFI** - Path traversal, PHP wrappers, null byte injection
-- **Authentication** - Bypass, default credentials, brute force detection
-- **IDOR** - Access control testing, ID enumeration
-- **And more...** - SSTI, XXE, Command Injection
-
-### 🛠️ Easy-to-Use Tools
-- **Web Crawler** - Discover URLs, forms, parameters, APIs
-- **Source Analyzer** - Find secrets, sinks, dangerous functions
-- **Payload Generator** - Create sophisticated bypass payloads
-- **Session Manager** - Handle authentication, cookies, tokens
-- **CVE Search** - Research known vulnerabilities
-- **Report Generator** - HackerOne-quality reports
-
----
-
-## 🚀 Quick Start
-
-### Installation
+## Quick Start
 
 ```bash
-# Clone the repository
-cd vulnhunter
-
 # Install dependencies
-pip install -r requirements.txt
+pip install aiohttp requests httpx rich
 
-# Make sure Ollama is running
-ollama serve
+# Fast automatic scan (recommended)
+python main.py -t https://target.com
 
-# Pull a model (8B models are recommended for efficiency)
-ollama pull llama3.1:8b
-```
+# Scan specific parameter
+python main.py -t "https://target.com/search?q=test" -p q --type xss
 
-### Start Hunting
-
-```bash
-# Interactive AI mode (recommended)
-python main.py -i -t https://example.com
-
-# Or just run and select model interactively
-python main.py
-```
-
----
-
-## 📖 Usage
-
-### CLI Options
-
-```bash
-# Interactive AI-powered hunting
-python main.py -i -t https://example.com
-
-# Use a specific model
-python main.py -i -t https://example.com -m llama3.1:70b
-
-# Automatic scan without AI
-python main.py --auto -t https://example.com
-
-# Scan specific parameter for XSS
-python main.py -t "https://example.com/search?q=test" -p q --type xss
+# Interactive AI mode (requires Ollama)
+python main.py -i -t https://target.com
 
 # Save results to file
-python main.py --auto -t https://example.com -o results.json
-
-# Select model interactively
-python main.py --select-model
-
-# Use proxy (for Burp Suite)
-python main.py -i -t https://example.com --proxy http://127.0.0.1:8080
+python main.py -t https://target.com -o results.json
 ```
 
-### Python API
+## Usage
 
-```python
-from vulnhunter import VulnHunterLLM, WebTools
-
-# AI-Powered Hunting
-hunter = VulnHunterLLM(model="llama3.1:8b")
-hunter.start("https://example.com")
-
-# Direct Tool Usage (without AI)
-tools = WebTools()
-
-# Crawl a website
-result = tools.crawl("https://example.com", depth=2)
-print(f"Found {len(result['forms'])} forms")
-
-# Scan for XSS
-xss_result = tools.scan_xss("https://example.com/search?q=test", param="q")
-if xss_result['summary']['vulnerable_count'] > 0:
-    print("XSS Found!")
-
-# Generate payloads
-payload = tools.generate_payload(vuln_type="sqli", technique="union", db="mysql")
-print(payload['payload'])
-```
-
----
-
-## 🔧 Available Tools
-
-The LLM has access to these tools:
-
-### Web Reconnaissance
-| Tool | Description |
-|------|-------------|
-| `fetch(url)` | Fetch a URL and get response |
-| `crawl(url, depth)` | Crawl site to discover structure |
-| `analyze(url)` | Deep page analysis |
-| `read_source(url)` | Read page source code |
-
-### HTTP Requests
-| Tool | Description |
-|------|-------------|
-| `send_request(method, url, ...)` | Full custom HTTP request |
-| `inject_payload(url, param, payload)` | Inject payload into parameter |
-
-### Vulnerability Scanners
-| Tool | Description |
-|------|-------------|
-| `scan_xss(url, param)` | Scan for XSS |
-| `scan_sqli(url, param)` | Scan for SQL injection |
-| `scan_ssrf(url, param)` | Scan for SSRF |
-| `scan_lfi(url, param)` | Scan for LFI |
-| `scan_auth(login_url)` | Scan authentication |
-| `scan_idor(url, param, current_id)` | Scan for IDOR |
-| `quick_scan(url, param)` | Quick multi-vuln scan |
-
-### Payload Tools
-| Tool | Description |
-|------|-------------|
-| `generate_payload(vuln_type, ...)` | Generate sophisticated payload |
-| `get_payloads(category)` | Get pre-built payloads |
-| `mutate_payload(payload)` | Create bypass variations |
-
-### Session Management
-| Tool | Description |
-|------|-------------|
-| `login(url, username, password)` | Login to application |
-| `set_cookie(name, value)` | Set a cookie |
-| `set_header(name, value)` | Set a header |
-
-### Research
-| Tool | Description |
-|------|-------------|
-| `search_cve(cve_id)` | Get CVE details |
-| `search_vulnerability(query)` | Search vulnerabilities |
-| `search_exploit(query)` | Find exploits |
-| `search_technology_vulns(tech, version)` | Technology-specific vulns |
-
-### Reporting
-| Tool | Description |
-|------|-------------|
-| `create_report(vuln_type, url, ...)` | Generate vulnerability report |
-| `get_findings()` | Get all findings |
-
----
-
-## 🎮 Interactive Commands
-
-During an interactive session:
-
-| Command | Description |
-|---------|-------------|
-| `quit` | Exit and show final report |
-| `report` | Show current findings |
-| `tools` | List all available tools |
-| `save` | Save findings to file |
-| `clear` | Clear conversation history |
-| `help` | Show help |
-
----
-
-## 💡 LLM Tool Calling
-
-The AI uses tools with this format:
-
-```
-TOOL: tool_name(param1="value1", param2="value2")
-```
-
-### Examples
-
-```
-# Crawl a website
-TOOL: crawl(url="https://example.com", depth=2)
-
-# Scan for XSS
-TOOL: scan_xss(url="https://example.com/search?q=test", param="q")
-
-# Inject a custom payload
-TOOL: inject_payload(url="https://example.com/page?id=1", param="id", payload="' OR '1'='1")
-
-# Generate SQLi payload
-TOOL: generate_payload(vuln_type="sqli", technique="union", db="mysql", columns=3)
-
-# Search for CVE
-TOOL: search_cve(cve_id="CVE-2021-44228")
-```
-
----
-
-## 📊 Example Workflow
-
-### 1. Start a Hunt
-```
-You: Hunt for vulnerabilities on https://example.com
-
-AI: I'll start by crawling the site to discover the attack surface.
-TOOL: crawl(url="https://example.com", depth=2)
-```
-
-### 2. Analyze Results
-```
-AI: Found 15 URLs, 3 forms, and 8 parameters. Let me test the search function.
-TOOL: scan_xss(url="https://example.com/search?q=test", param="q")
-```
-
-### 3. Deep Testing
-```
-AI: Basic XSS is filtered, trying bypass payloads.
-TOOL: scan_xss(url="https://example.com/search?q=test", param="q", category="filter_bypass")
-```
-
-### 4. Generate Report
-```
-You: Create a report for the XSS finding
-
-AI: TOOL: create_report(vuln_type="xss", url="https://example.com/search", parameter="q", payload="<img src=x onerror=alert(1)>")
-```
-
----
-
-## 🔐 Supported Vulnerability Types
-
-### Cross-Site Scripting (XSS)
-- Reflected XSS
-- DOM-based XSS  
-- Filter bypass techniques
-- WAF bypass payloads
-- Polyglot payloads
-
-### SQL Injection
-- Error-based
-- Boolean-based blind
-- Time-based blind
-- UNION-based
-- Stacked queries
-- Multi-database support (MySQL, PostgreSQL, MSSQL, Oracle)
-
-### Server-Side Request Forgery (SSRF)
-- Localhost access
-- Cloud metadata (AWS, GCP, Azure)
-- Internal network scanning
-- Protocol smuggling (gopher, dict, file)
-- Bypass techniques
-
-### Local File Inclusion (LFI)
-- Path traversal
-- PHP wrappers
-- Null byte injection
-- Double encoding
-- Log poisoning detection
-
-### Authentication Vulnerabilities
-- SQL injection bypass
-- Default credentials
-- Weak password policies
-- Session security
-- Brute force detection
-
-### Insecure Direct Object Reference (IDOR)
-- ID enumeration
-- Cross-user access
-- Sequential ID testing
-- UUID prediction
-
----
-
-## 📋 Report Generation
-
-VulnHunter generates HackerOne-quality reports:
-
-```markdown
-# Cross-Site Scripting (XSS) in `q` parameter on /search
-
-## Summary
-- **Severity:** High
-- **Type:** XSS
-- **URL:** https://example.com/search?q=test
-- **CWE:** CWE-79
-- **CVSS Score:** 6.1
-
-## Description
-A Cross-Site Scripting vulnerability was discovered...
-
-## Steps to Reproduce
-1. Navigate to https://example.com/search
-2. Enter payload: `<script>alert(1)</script>`
-3. Submit the search
-4. Observe script execution
-
-## Impact
-An attacker can:
-- Steal session cookies
-- Perform actions as the user
-- Redirect to malicious sites
-
-## Remediation
-- Implement output encoding
-- Use Content Security Policy
-- Set HTTPOnly cookies
-```
-
----
-
-## ⚙️ Configuration
-
-### Recommended Models
-
-| Model | Speed | Capability | Use Case |
-|-------|-------|------------|----------|
-| `llama3.1:8b` | ⚡⚡⚡ | ⭐⭐⭐ | Daily hunting |
-| `llama3.1:70b` | ⚡ | ⭐⭐⭐⭐⭐ | Deep analysis |
-| `llama3.2:3b` | ⚡⚡⚡⚡ | ⭐⭐ | Quick scans |
-| `codellama:7b` | ⚡⚡⚡ | ⭐⭐⭐ | Code analysis |
-| `mixtral:8x7b` | ⚡⚡ | ⭐⭐⭐⭐ | Thorough hunting |
-
-### Environment Variables
+### Fast Automatic Scan
+The default mode scans the target for XSS, SQLi, LFI, and SSRF vulnerabilities:
 
 ```bash
-# Optional: Set default model
-export VULNHUNTER_MODEL="llama3.1:8b"
-
-# Optional: Ollama host
-export OLLAMA_HOST="http://localhost:11434"
+python main.py -t https://target.com
 ```
 
----
+### Scan Specific Parameter
+Test a specific parameter for a vulnerability type:
 
-## 🛡️ Ethical Use
+```bash
+python main.py -t "https://target.com/page?id=1" -p id --type sqli
+```
 
-This tool is for **authorized security testing only**.
+### Interactive AI Mode
+Uses Ollama LLM for intelligent hunting:
 
-⚠️ **Important:**
-- Only test applications you have permission to test
-- Follow responsible disclosure practices
-- Don't use for malicious purposes
-- Respect rate limits and don't DoS targets
-- Store findings securely
+```bash
+# Start Ollama first
+ollama serve
 
----
+# Run interactive mode
+python main.py -i -t https://target.com -m llama3.1:8b
+```
 
-## 🤝 Contributing
+## Python API
 
-Contributions welcome! Areas to improve:
-- Additional vulnerability scanners
-- More payload templates
-- Better WAF detection/bypass
-- Integration with other tools
-- UI improvements
+```python
+from vulnhunter import quick_scan, VulnHunterLLM
 
----
+# Fast scan (no LLM needed)
+result = quick_scan("https://target.com/search?q=test")
+print(f"Found {result['vuln_count']} vulnerabilities")
+for vuln in result['vulnerabilities']:
+    print(f"  - {vuln['type']}: {vuln['payload']}")
 
-## 📜 License
+# AI-powered hunting
+hunter = VulnHunterLLM(model="llama3.1:8b")
+hunter.start("https://target.com")
+```
 
-MIT License - See LICENSE file
+## Detected Vulnerabilities
 
----
+| Type | Detection Method |
+|------|-----------------|
+| **XSS** | Payload reflection in HTML context |
+| **SQLi** | Error-based, Boolean-based, Time-based, UNION |
+| **LFI** | File content indicators (/etc/passwd, etc.) |
+| **SSRF** | Internal resource access confirmation |
+| **IDOR** | Cross-user data access |
+| **Auth Bypass** | SQL injection in login forms |
 
-## 🙏 Acknowledgments
+## How It Works
 
-- Ollama team for the amazing LLM runtime
-- Security research community
-- HackerOne for inspiration on report formats
-- OWASP for vulnerability references
+1. **Discovery** - Finds forms, parameters, and internal links
+2. **Verification** - Confirms URLs exist before testing (no dead link reports)
+3. **Testing** - Sends smart payloads in parallel for speed
+4. **Confirmation** - Verifies vulnerabilities with actual exploitation
+5. **Extraction** - Proves impact by extracting data when possible
 
----
+## Example Output
 
-**Happy Hunting! 🎯**
+```
+╔═══════════════════════════════════════════════════════════════╗
+║   Fast AI-Powered Vulnerability Hunter                        ║
+╚═══════════════════════════════════════════════════════════════╝
+
+[*] Fast scanning: https://target.com/search?q=test
+[+] Scan completed in 1.23s
+[*] Forms found: 2
+[*] Parameters tested: 5
+[*] Links discovered: 12
+
+==================================================
+CONFIRMED: SQLI
+==================================================
+Severity: CRITICAL
+URL: https://target.com/search?q=test
+Parameter: q
+Payload: ' OR '1'='1
+Evidence: SQL error detected: mysql
+```
+
+## Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-t, --target` | Target URL to scan |
+| `-p, --param` | Specific parameter to test |
+| `--type` | Vulnerability type: xss, sqli, ssrf, lfi, quick |
+| `-i, --interactive` | Interactive AI mode |
+| `-m, --model` | Ollama model (default: llama3.1:8b) |
+| `-o, --output` | Save results to JSON file |
+
+## Requirements
+
+- Python 3.8+
+- aiohttp (for async requests)
+- requests, httpx (for HTTP)
+- rich (for pretty output)
+- ollama (optional, for AI mode)
+
+## License
+
+MIT License

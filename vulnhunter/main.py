@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-VulnHunter - AI-Powered Web Application Vulnerability Scanner
-Main entry point with CLI interface
+VulnHunter - Fast AI-Powered Vulnerability Scanner
+Redesigned for speed, accuracy, and real exploitation
 """
 
 import sys
 import argparse
 import json
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -14,39 +15,26 @@ try:
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
-    from rich.markdown import Markdown
     from rich.progress import Progress, SpinnerColumn, TextColumn
-    from rich.prompt import Prompt, Confirm
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    print("Note: Install 'rich' for better UI: pip install rich")
 
-from llm_interface import VulnHunterLLM, manual_scan
-from tools.web_tools import WebTools
-from tools.search_tools import SearchTools
-from tools.report_tools import ReportTools
+from llm_interface import VulnHunterLLM, FastScanner, quick_scan
 
 
-# Initialize console
 console = Console() if RICH_AVAILABLE else None
 
 
 def print_banner():
-    """Print the VulnHunter banner"""
+    """Print banner"""
     banner = """
 ╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
 ║   ██╗   ██╗██╗   ██╗██╗     ███╗   ██╗██╗  ██╗██╗   ██╗███╗  ║
 ║   ██║   ██║██║   ██║██║     ████╗  ██║██║  ██║██║   ██║████╗ ║
-║   ██║   ██║██║   ██║██║     ██╔██╗ ██║███████║██║   ██║██╔██╗║
-║   ╚██╗ ██╔╝██║   ██║██║     ██║╚██╗██║██╔══██║██║   ██║██║╚██║
-║    ╚████╔╝ ╚██████╔╝███████╗██║ ╚████║██║  ██║╚██████╔╝██║ ╚█║
+║   ╚██╗ ██╔╝╚██████╔╝███████╗██║ ╚████║██║  ██║╚██████╔╝██║ ╚█║
 ║     ╚═══╝   ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ║
-║                                                               ║
-║   AI-Powered Web Vulnerability Hunter                         ║
-║   Powered by Ollama LLM                                       ║
-║                                                               ║
+║   Fast AI-Powered Vulnerability Hunter                        ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
     if console:
@@ -55,249 +43,101 @@ def print_banner():
         print(banner)
 
 
-def print_info(message: str):
-    """Print info message"""
+def print_info(msg: str):
     if console:
-        console.print(f"[blue][*][/blue] {message}")
+        console.print(f"[blue][*][/blue] {msg}")
     else:
-        print(f"[*] {message}")
+        print(f"[*] {msg}")
 
 
-def print_success(message: str):
-    """Print success message"""
+def print_success(msg: str):
     if console:
-        console.print(f"[green][+][/green] {message}")
+        console.print(f"[green][+][/green] {msg}")
     else:
-        print(f"[+] {message}")
+        print(f"[+] {msg}")
 
 
-def print_warning(message: str):
-    """Print warning message"""
+def print_warning(msg: str):
     if console:
-        console.print(f"[yellow][!][/yellow] {message}")
+        console.print(f"[yellow][!][/yellow] {msg}")
     else:
-        print(f"[!] {message}")
+        print(f"[!] {msg}")
 
 
-def print_error(message: str):
-    """Print error message"""
+def print_error(msg: str):
     if console:
-        console.print(f"[red][-][/red] {message}")
+        console.print(f"[red][-][/red] {msg}")
     else:
-        print(f"[-] {message}")
+        print(f"[-] {msg}")
 
 
-def print_finding(finding: dict):
-    """Print a vulnerability finding"""
-    severity_colors = {
-        "critical": "red",
-        "high": "orange3",
-        "medium": "yellow",
-        "low": "blue",
-        "info": "gray"
-    }
-    
-    severity = finding.get("severity", "medium").lower()
-    color = severity_colors.get(severity, "white")
+def print_vuln(vuln: dict):
+    """Print vulnerability finding"""
+    colors = {"critical": "red", "high": "orange3", "medium": "yellow", "low": "blue"}
+    severity = vuln.get("severity", "medium").lower()
+    color = colors.get(severity, "white")
     
     if console:
-        console.print(f"\n[bold {color}]{'='*60}[/bold {color}]")
-        console.print(f"[bold {color}]VULNERABILITY FOUND: {finding.get('type', 'Unknown').upper()}[/bold {color}]")
-        console.print(f"[bold {color}]{'='*60}[/bold {color}]")
+        console.print(f"\n[bold {color}]{'='*50}[/bold {color}]")
+        console.print(f"[bold {color}]CONFIRMED: {vuln.get('type', 'Unknown').upper()}[/bold {color}]")
+        console.print(f"[bold {color}]{'='*50}[/bold {color}]")
         console.print(f"[bold]Severity:[/bold] [{color}]{severity.upper()}[/{color}]")
-        console.print(f"[bold]URL:[/bold] {finding.get('url', 'N/A')}")
-        console.print(f"[bold]Parameter:[/bold] {finding.get('param', 'N/A')}")
-        console.print(f"[bold]Payload:[/bold] {finding.get('payload', 'N/A')}")
+        console.print(f"[bold]URL:[/bold] {vuln.get('url', 'N/A')}")
+        console.print(f"[bold]Parameter:[/bold] {vuln.get('param', 'N/A')}")
+        console.print(f"[bold]Payload:[/bold] {vuln.get('payload', 'N/A')}")
+        console.print(f"[bold]Evidence:[/bold] {vuln.get('evidence', 'N/A')}")
+        if vuln.get('extracted_data'):
+            console.print(f"[bold]Extracted:[/bold] {vuln.get('extracted_data', '')[:200]}")
     else:
-        print(f"\n{'='*60}")
-        print(f"VULNERABILITY FOUND: {finding.get('type', 'Unknown').upper()}")
-        print(f"{'='*60}")
+        print(f"\n{'='*50}")
+        print(f"CONFIRMED: {vuln.get('type', 'Unknown').upper()}")
+        print(f"{'='*50}")
         print(f"Severity: {severity.upper()}")
-        print(f"URL: {finding.get('url', 'N/A')}")
-        print(f"Parameter: {finding.get('param', 'N/A')}")
-        print(f"Payload: {finding.get('payload', 'N/A')}")
+        print(f"URL: {vuln.get('url', 'N/A')}")
+        print(f"Parameter: {vuln.get('param', 'N/A')}")
+        print(f"Payload: {vuln.get('payload', 'N/A')}")
+        print(f"Evidence: {vuln.get('evidence', 'N/A')}")
 
 
-def select_model() -> str:
-    """Let user select Ollama model"""
-    models = [
-        ("llama3.1:8b", "Fast and efficient, good for quick scans"),
-        ("llama3.1:70b", "More capable, better analysis"),
-        ("llama3.2:1b", "Ultra-fast, basic scanning"),
-        ("llama3.2:3b", "Fast, lightweight scanning"),
-        ("codellama:7b", "Code-focused, good for source analysis"),
-        ("mixtral:8x7b", "Very capable, thorough analysis"),
-        ("phi3:medium", "Microsoft Phi-3, fast and smart"),
-        ("gemma2:9b", "Google Gemma 2, balanced"),
-        ("qwen2.5:7b", "Alibaba Qwen, multilingual"),
-        ("deepseek-coder:6.7b", "DeepSeek, code-focused"),
-    ]
-    
-    if console:
-        table = Table(title="Available Models")
-        table.add_column("Option", style="cyan")
-        table.add_column("Model", style="green")
-        table.add_column("Description")
-        
-        for i, (model, desc) in enumerate(models, 1):
-            table.add_row(str(i), model, desc)
-        
-        console.print(table)
-        
-        choice = Prompt.ask(
-            "Select model",
-            choices=[str(i) for i in range(1, len(models) + 1)] + ["custom"],
-            default="1"
-        )
-        
-        if choice == "custom":
-            return Prompt.ask("Enter custom model name")
-        return models[int(choice) - 1][0]
-    else:
-        print("\nAvailable Models:")
-        for i, (model, desc) in enumerate(models, 1):
-            print(f"  {i}. {model} - {desc}")
-        
-        choice = input("\nSelect model (1-10, or custom): ").strip()
-        if choice.lower() == "custom":
-            return input("Enter custom model name: ").strip()
-        try:
-            return models[int(choice) - 1][0]
-        except:
-            return "llama3.1:8b"
-
-
-def interactive_mode(model: str, target: Optional[str] = None):
-    """Run interactive hunting session"""
+def fast_scan_mode(target: str, output: Optional[str] = None):
+    """Ultra-fast scan mode - parallel async scanning"""
     print_banner()
-    print_info(f"Using model: {model}")
+    print_info(f"Fast scanning: {target}")
     
-    # Get target if not provided
-    if not target:
-        if console:
-            target = Prompt.ask("\n[bold]Enter target URL[/bold]")
-        else:
-            target = input("\nEnter target URL: ").strip()
-    
-    if not target:
-        print_error("No target provided. Exiting.")
-        return
-    
-    # Validate URL
-    if not target.startswith(('http://', 'https://')):
-        target = 'https://' + target
-    
-    print_success(f"Target: {target}")
-    print_info("Initializing VulnHunter AI...")
+    start_time = datetime.now()
     
     try:
-        hunter = VulnHunterLLM(model=model)
+        if console:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console
+            ) as progress:
+                task = progress.add_task("Scanning...", total=None)
+                results = quick_scan(target)
+        else:
+            print_info("Scanning... (this is fast)")
+            results = quick_scan(target)
     except Exception as e:
-        print_error(f"Failed to initialize: {e}")
-        print_warning("Make sure Ollama is running: ollama serve")
+        print_error(f"Scan failed: {e}")
         return
     
-    print_info("Starting vulnerability hunt...")
-    print_info("Type 'quit' to exit, 'report' for findings, 'help' for commands")
-    print()
+    elapsed = (datetime.now() - start_time).total_seconds()
     
-    # Start the hunt
-    response = hunter.start(target)
+    # Print results
+    print_success(f"Scan completed in {elapsed:.2f}s")
+    print_info(f"Forms found: {results.get('forms_found', 0)}")
+    print_info(f"Parameters tested: {results.get('params_tested', 0)}")
+    print_info(f"Links discovered: {results.get('links_found', 0)}")
     
-    if console:
-        console.print(Panel(Markdown(response), title="VulnHunter AI", border_style="cyan"))
+    vulns = results.get("vulnerabilities", [])
+    
+    if vulns:
+        print_success(f"\nFound {len(vulns)} CONFIRMED vulnerabilities:")
+        for vuln in vulns:
+            print_vuln(vuln)
     else:
-        print(f"\n--- VulnHunter AI ---\n{response}\n---")
-    
-    # Interactive loop
-    while True:
-        try:
-            if console:
-                user_input = Prompt.ask("\n[bold cyan]You[/bold cyan]")
-            else:
-                user_input = input("\nYou: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\n")
-            break
-        
-        if not user_input:
-            continue
-        
-        if user_input.lower() == 'quit':
-            print_info("Generating final report...")
-            print(hunter.get_report())
-            break
-        
-        elif user_input.lower() == 'report':
-            report = hunter.get_report()
-            if console:
-                console.print(Panel(Markdown(report), title="Findings Report", border_style="green"))
-            else:
-                print(report)
-        
-        elif user_input.lower() == 'help':
-            help_text = """
-## Commands
-- `quit` - Exit and show final report
-- `report` - Show current findings
-- `tools` - List available tools
-- `clear` - Clear conversation history
-- `save` - Save findings to file
-
-## Tips
-- Ask the AI to focus on specific vulnerability types
-- Request deeper testing of interesting parameters
-- Ask for HackerOne-style reports of findings
-- Request payload mutations for bypass attempts
-"""
-            if console:
-                console.print(Panel(Markdown(help_text), title="Help", border_style="blue"))
-            else:
-                print(help_text)
-        
-        elif user_input.lower() == 'tools':
-            tools_desc = hunter._get_tools_description()
-            if console:
-                console.print(Panel(Markdown(tools_desc), title="Available Tools", border_style="yellow"))
-            else:
-                print(tools_desc)
-        
-        elif user_input.lower() == 'save':
-            filename = f"vulnhunter_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            report = hunter.get_report()
-            with open(filename, 'w') as f:
-                f.write(report)
-            print_success(f"Report saved to {filename}")
-        
-        elif user_input.lower() == 'clear':
-            hunter.conversation = []
-            print_success("Conversation cleared")
-        
-        else:
-            response = hunter.continue_hunt(user_input)
-            
-            if console:
-                console.print(Panel(Markdown(response), title="VulnHunter AI", border_style="cyan"))
-            else:
-                print(f"\n--- VulnHunter AI ---\n{response}\n---")
-    
-    print_success("Hunt complete!")
-
-
-def auto_scan_mode(target: str, output: Optional[str] = None):
-    """Run automatic scan without LLM"""
-    print_banner()
-    print_info(f"Starting automatic scan of {target}")
-    
-    results = manual_scan(target)
-    
-    # Print findings
-    for finding in results.get("findings", []):
-        print_finding(finding)
-    
-    # Summary
-    findings_count = len(results.get("findings", []))
-    print_info(f"\nScan complete. Found {findings_count} potential vulnerabilities.")
+        print_info("\nNo confirmed vulnerabilities found.")
     
     # Save results
     if output:
@@ -308,11 +148,82 @@ def auto_scan_mode(target: str, output: Optional[str] = None):
     return results
 
 
-def single_scan(url: str, param: str, vuln_type: str):
-    """Run a single vulnerability scan"""
+def interactive_mode(model: str, target: Optional[str] = None):
+    """Interactive AI mode"""
     print_banner()
-    print_info(f"Scanning {param} parameter for {vuln_type}")
+    print_info(f"Using model: {model}")
     
+    if not target:
+        target = input("\nEnter target URL: ").strip()
+    
+    if not target:
+        print_error("No target provided.")
+        return
+    
+    if not target.startswith(('http://', 'https://')):
+        target = 'https://' + target
+    
+    print_success(f"Target: {target}")
+    print_info("Initializing AI...")
+    
+    try:
+        hunter = VulnHunterLLM(model=model)
+    except Exception as e:
+        print_error(f"Failed to initialize: {e}")
+        print_warning("Make sure Ollama is running: ollama serve")
+        return
+    
+    print_info("Starting hunt...")
+    print_info("Commands: 'quit' to exit, 'report' for findings, 'scan' for fast scan")
+    print()
+    
+    response = hunter.start(target)
+    
+    if console:
+        console.print(Panel(response, title="VulnHunter AI", border_style="cyan"))
+    else:
+        print(f"\n--- VulnHunter AI ---\n{response}\n---")
+    
+    while True:
+        try:
+            user_input = input("\nYou: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n")
+            break
+        
+        if not user_input:
+            continue
+        
+        if user_input.lower() == 'quit':
+            print(hunter.get_report())
+            break
+        
+        elif user_input.lower() == 'report':
+            print(hunter.get_report())
+        
+        elif user_input.lower() == 'scan':
+            # Run fast scan
+            print_info("Running fast scan...")
+            results = quick_scan(target)
+            for vuln in results.get("vulnerabilities", []):
+                print_vuln(vuln)
+        
+        else:
+            response = hunter.continue_hunt(user_input)
+            if console:
+                console.print(Panel(response, title="VulnHunter AI", border_style="cyan"))
+            else:
+                print(f"\n--- VulnHunter AI ---\n{response}\n---")
+    
+    print_success("Hunt complete!")
+
+
+def single_param_scan(url: str, param: str, vuln_type: str):
+    """Scan single parameter"""
+    print_banner()
+    print_info(f"Testing {param} for {vuln_type}")
+    
+    from tools.web_tools import WebTools
     tools = WebTools()
     
     if vuln_type == "xss":
@@ -326,13 +237,13 @@ def single_scan(url: str, param: str, vuln_type: str):
     elif vuln_type == "quick":
         results = tools.quick_scan(url, param)
     else:
-        print_error(f"Unknown vulnerability type: {vuln_type}")
+        print_error(f"Unknown type: {vuln_type}")
         return
     
     print(json.dumps(results, indent=2))
     
     if results.get("summary", {}).get("vulnerable_count", 0) > 0:
-        print_success(f"Found vulnerabilities! Check results above.")
+        print_success("Vulnerabilities found!")
     else:
         print_info("No vulnerabilities found with current payloads.")
 
@@ -340,66 +251,51 @@ def single_scan(url: str, param: str, vuln_type: str):
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="VulnHunter - AI-Powered Web Vulnerability Scanner",
+        description="VulnHunter - Fast AI-Powered Vulnerability Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Interactive AI-powered hunting
-  python main.py -i -t https://example.com
+  # Fast automatic scan (recommended)
+  python main.py -t https://example.com
   
-  # Quick automatic scan
-  python main.py --auto -t https://example.com
+  # Interactive AI mode
+  python main.py -i -t https://example.com
   
   # Scan specific parameter
   python main.py -t "https://example.com/search?q=test" -p q --type xss
   
-  # Use specific model
-  python main.py -i -t https://example.com -m llama3.1:70b
+  # Save results to file
+  python main.py -t https://example.com -o results.json
 """
     )
     
     parser.add_argument('-t', '--target', help='Target URL')
-    parser.add_argument('-m', '--model', default='llama3.1:8b', help='Ollama model to use')
+    parser.add_argument('-m', '--model', default='llama3.1:8b', help='Ollama model')
     parser.add_argument('-i', '--interactive', action='store_true', help='Interactive AI mode')
-    parser.add_argument('--auto', action='store_true', help='Automatic scan without AI')
     parser.add_argument('-p', '--param', help='Parameter to test')
     parser.add_argument('--type', choices=['xss', 'sqli', 'ssrf', 'lfi', 'quick'], help='Vulnerability type')
-    parser.add_argument('-o', '--output', help='Output file for results')
-    parser.add_argument('--select-model', action='store_true', help='Interactively select model')
-    parser.add_argument('--proxy', help='Proxy URL (e.g., http://127.0.0.1:8080)')
+    parser.add_argument('-o', '--output', help='Output file')
     
     args = parser.parse_args()
     
-    # Model selection
-    model = args.model
-    if args.select_model:
-        model = select_model()
-    
-    # Determine mode
     if args.param and args.type:
-        # Single scan mode
         if not args.target:
-            print_error("Target URL required for single scan mode")
+            print_error("Target URL required")
             sys.exit(1)
-        single_scan(args.target, args.param, args.type)
+        single_param_scan(args.target, args.param, args.type)
     
-    elif args.auto:
-        # Automatic scan mode
-        if not args.target:
-            print_error("Target URL required for automatic scan mode")
-            sys.exit(1)
-        auto_scan_mode(args.target, args.output)
+    elif args.interactive:
+        interactive_mode(args.model, args.target)
     
-    elif args.interactive or args.target:
-        # Interactive mode (default)
-        interactive_mode(model, args.target)
+    elif args.target:
+        # Default: fast scan
+        fast_scan_mode(args.target, args.output)
     
     else:
-        # No arguments - show help and enter interactive mode
+        # No args - show help and prompt
         print_banner()
-        print_info("Starting in interactive mode...")
-        model = select_model()
-        interactive_mode(model)
+        print_info("No target specified. Use -t URL or run interactively with -i")
+        parser.print_help()
 
 
 if __name__ == "__main__":

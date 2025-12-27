@@ -2,19 +2,17 @@
 """
 VulnHunter - Autonomous AI Bug Bounty Hunter
 
-This is NOT a static scanner. This is an autonomous AI security researcher that:
-- Thinks and reasons like a human bug bounty hunter
-- Adapts its approach based on what it discovers
-- Creates custom payloads based on code analysis
-- Confirms vulnerabilities through real exploitation
-- Never simulates or fakes results
+Just give it a URL - the AI does everything:
+- Discovers forms, parameters, endpoints
+- Analyzes code and understands the application
+- Creates smart payloads
+- Tests and exploits vulnerabilities
+- Reports confirmed findings
 """
 
 import sys
 import argparse
-import json
 from datetime import datetime
-from typing import Optional
 
 try:
     from rich.console import Console
@@ -24,8 +22,7 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
-from llm_interface import VulnHunterLLM, quick_scan
-
+from llm_interface import VulnHunterLLM
 
 console = Console() if RICH_AVAILABLE else None
 
@@ -40,7 +37,7 @@ def print_banner():
 ║    ╚═══╝   ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚═╝  ╚═══╝╚═════╝       ║
 ║                                                               ║
 ║   Autonomous AI Bug Bounty Hunter                             ║
-║   Not a scanner - An intelligent security researcher          ║
+║   Just give me a URL - I do the rest                          ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
@@ -50,155 +47,124 @@ def print_banner():
         print(banner)
 
 
-def print_msg(msg: str, style: str = ""):
+def show_response(response: str, title: str = "🔍 AI Hunter"):
+    """Display AI response"""
     if console:
-        console.print(msg, style=style)
+        console.print(Panel(Markdown(response), title=title, border_style="cyan"))
     else:
-        print(msg)
+        print(f"\n{'='*60}")
+        print(f" {title}")
+        print('='*60)
+        print(response)
+        print('='*60 + "\n")
 
 
-def print_info(msg: str):
-    print_msg(f"[*] {msg}", "blue")
-
-
-def print_success(msg: str):
-    print_msg(f"[+] {msg}", "green")
-
-
-def print_warning(msg: str):
-    print_msg(f"[!] {msg}", "yellow")
-
-
-def print_error(msg: str):
-    print_msg(f"[-] {msg}", "red")
-
-
-def autonomous_hunt(target: str, model: str = "llama3.1:8b"):
+def hunt(target: str, model: str = "llama3.1:8b"):
     """
-    Start an autonomous AI-driven bug hunt
+    Start autonomous bug hunting
     
-    The AI will:
-    1. Explore the target like a human researcher
-    2. Analyze code and understand the application
-    3. Identify attack surfaces
-    4. Create intelligent, context-aware payloads
-    5. Adapt based on responses
-    6. Confirm vulnerabilities through exploitation
-    7. Report only real, confirmed findings
+    The AI will automatically:
+    1. Fetch and analyze the target
+    2. Find all forms, parameters, endpoints
+    3. Understand the technology stack
+    4. Create intelligent payloads
+    5. Test for vulnerabilities
+    6. Confirm and report findings
     """
     print_banner()
-    print_info(f"Target: {target}")
-    print_info(f"AI Model: {model}")
-    print_info("Initializing autonomous hunter...")
-    print()
+    
+    if console:
+        console.print(f"[bold blue][*] Target:[/bold blue] {target}")
+        console.print(f"[bold blue][*] Model:[/bold blue] {model}")
+        console.print()
+        console.print("[yellow]Initializing AI Hunter...[/yellow]")
+    else:
+        print(f"[*] Target: {target}")
+        print(f"[*] Model: {model}")
+        print("\nInitializing AI Hunter...")
     
     try:
         hunter = VulnHunterLLM(model=model)
     except Exception as e:
-        print_error(f"Failed to initialize: {e}")
-        print_warning("Make sure Ollama is running: ollama serve")
-        print_warning(f"And the model is available: ollama pull {model}")
+        if console:
+            console.print(f"[red][-] Error: {e}[/red]")
+            console.print("[yellow][!] Make sure Ollama is running: ollama serve[/yellow]")
+            console.print(f"[yellow][!] And model is available: ollama pull {model}[/yellow]")
+        else:
+            print(f"[-] Error: {e}")
+            print(f"[!] Make sure Ollama is running: ollama serve")
+            print(f"[!] And model is available: ollama pull {model}")
         return
     
-    print_success("AI Hunter initialized")
-    print_info("Starting autonomous security research...")
-    print_info("The AI will explore, analyze, and hunt for vulnerabilities")
-    print_info("This is real testing - every request is made to the actual target")
-    print()
-    print_info("=" * 60)
-    print()
-    
-    # Start the hunt
-    response = hunter.start(target)
-    
     if console:
-        console.print(Panel(Markdown(response), title="🔍 AI Hunter", border_style="cyan"))
+        console.print("[green][+] AI Hunter ready[/green]")
+        console.print()
+        console.print("[bold]The AI will now autonomously:[/bold]")
+        console.print("  • Explore and analyze the target")
+        console.print("  • Find forms, parameters, and endpoints")
+        console.print("  • Create intelligent payloads")
+        console.print("  • Test for vulnerabilities")
+        console.print("  • Confirm and report real findings")
+        console.print()
     else:
-        print(f"\n=== AI Hunter ===\n{response}\n================\n")
+        print("[+] AI Hunter ready")
+        print("\nThe AI will autonomously explore, test, and find vulnerabilities.\n")
     
-    # Interactive loop
-    print()
-    print_info("Commands: 'continue', 'report', 'findings', 'quit'")
-    print_info("Or give specific instructions to the AI")
-    print()
+    # Start the autonomous hunt
+    response = hunter.start(target)
+    show_response(response)
+    
+    # Interactive loop for guidance
+    if console:
+        console.print("[dim]Commands: 'c' = continue, 'r' = report, 'q' = quit, or type instructions[/dim]")
+    else:
+        print("Commands: 'c' = continue, 'r' = report, 'q' = quit, or type instructions")
     
     while True:
         try:
-            user_input = input("\n[You] > ").strip()
+            user_input = input("\n> ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n")
             break
         
-        if not user_input:
-            continue
+        if not user_input or user_input.lower() == 'c':
+            response = hunter.continue_hunt()
+            show_response(response)
         
-        if user_input.lower() == 'quit':
-            print_info("Generating final report...")
-            print(hunter.get_report())
+        elif user_input.lower() == 'q':
+            print("\n" + hunter.get_report())
             break
         
-        elif user_input.lower() == 'report':
+        elif user_input.lower() == 'r':
             print(hunter.get_report())
         
-        elif user_input.lower() == 'findings':
+        elif user_input.lower() == 'f':
             findings = hunter.get_findings()
             if findings:
-                print_success(f"Confirmed vulnerabilities: {len(findings)}")
+                if console:
+                    console.print(f"[green][+] {len(findings)} confirmed vulnerabilities:[/green]")
+                else:
+                    print(f"[+] {len(findings)} confirmed vulnerabilities:")
                 for f in findings:
-                    print(f"  - {f['type']}: {f['url']} ({f['severity']})")
+                    print(f"    • [{f['severity'].upper()}] {f['type']}: {f['url']}")
             else:
-                print_info("No confirmed vulnerabilities yet")
-        
-        elif user_input.lower() == 'continue':
-            response = hunter.continue_hunt()
-            if console:
-                console.print(Panel(Markdown(response), title="🔍 AI Hunter", border_style="cyan"))
-            else:
-                print(f"\n=== AI Hunter ===\n{response}\n================\n")
+                print("[*] No confirmed vulnerabilities yet")
         
         else:
             # Custom instruction to the AI
             response = hunter.continue_hunt(user_input)
-            if console:
-                console.print(Panel(Markdown(response), title="🔍 AI Hunter", border_style="cyan"))
-            else:
-                print(f"\n=== AI Hunter ===\n{response}\n================\n")
+            show_response(response)
     
-    print_success("Hunt complete!")
-    
+    # Final report
     findings = hunter.get_findings()
-    if findings:
-        print_success(f"Total confirmed vulnerabilities: {len(findings)}")
+    if console:
+        console.print(f"\n[bold green]Hunt Complete![/bold green]")
+        console.print(f"[*] Requests made: {hunter.client.request_count}")
+        console.print(f"[*] Confirmed vulnerabilities: {len(findings)}")
     else:
-        print_info("No confirmed vulnerabilities found")
-
-
-def quick_mode(target: str, output: Optional[str] = None):
-    """Quick scan mode - still uses real requests"""
-    print_banner()
-    print_info(f"Quick scan: {target}")
-    print_warning("Note: For thorough hunting, use autonomous mode (-i)")
-    print()
-    
-    result = quick_scan(target)
-    
-    print_info(f"Requests made: {result.get('requests_made', 0)}")
-    
-    vulns = result.get("vulnerabilities", [])
-    if vulns:
-        print_success(f"Found {len(vulns)} confirmed vulnerabilities:")
-        for v in vulns:
-            print(f"  [{v['type']}] {v['param']} - {v.get('payload', '')[:50]}")
-    else:
-        print_info("No confirmed vulnerabilities in quick scan")
-        print_info("Try autonomous mode for deeper analysis: -i")
-    
-    if output:
-        with open(output, 'w') as f:
-            json.dump(result, f, indent=2)
-        print_success(f"Results saved to {output}")
-    
-    return result
+        print(f"\nHunt Complete!")
+        print(f"[*] Requests made: {hunter.client.request_count}")
+        print(f"[*] Confirmed vulnerabilities: {len(findings)}")
 
 
 def main():
@@ -206,65 +172,46 @@ def main():
         description="VulnHunter - Autonomous AI Bug Bounty Hunter",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This is NOT a static scanner. This is an autonomous AI security researcher.
+Just give me a URL - I do the rest.
 
-The AI will:
-  - Think and reason like a human bug bounty hunter
-  - Explore and understand the target application
-  - Create custom payloads based on code analysis
-  - Adapt its approach based on responses
-  - Confirm vulnerabilities through real exploitation
-  - Never simulate or fake results
+The AI will automatically:
+  • Explore the target and analyze source code
+  • Find all forms, parameters, and endpoints  
+  • Understand the technology stack
+  • Create intelligent, context-aware payloads
+  • Test for XSS, SQLi, SSRF, LFI, and more
+  • Confirm vulnerabilities through real exploitation
+  • Report only real, confirmed findings
 
 Examples:
-  # Start autonomous AI hunting (recommended)
-  python main.py -i -t https://target.com
-  
-  # Use a specific AI model
-  python main.py -i -t https://target.com -m llama3.1:70b
-  
-  # Quick scan (less thorough)
-  python main.py -t https://target.com
+  python main.py https://target.com
+  python main.py https://target.com -m llama3.1:70b
 """
     )
     
-    parser.add_argument('-t', '--target', required=False, help='Target URL')
-    parser.add_argument('-m', '--model', default='llama3.1:8b', help='Ollama model (default: llama3.1:8b)')
-    parser.add_argument('-i', '--interactive', action='store_true', help='Autonomous AI mode (recommended)')
-    parser.add_argument('-o', '--output', help='Save results to file')
+    parser.add_argument('url', nargs='?', help='Target URL to hunt')
+    parser.add_argument('-m', '--model', default='llama3.1:8b', 
+                        help='Ollama model (default: llama3.1:8b)')
     
     args = parser.parse_args()
     
-    if not args.target:
-        print_banner()
-        print_info("Autonomous AI Bug Bounty Hunter")
-        print()
-        print_info("Usage: python main.py -i -t <target_url>")
-        print()
-        print_info("The AI will autonomously:")
-        print_info("  1. Explore and understand the target")
-        print_info("  2. Identify attack surfaces")
-        print_info("  3. Create intelligent payloads")
-        print_info("  4. Confirm vulnerabilities through exploitation")
-        print_info("  5. Report only real, confirmed findings")
-        print()
-        
-        target = input("Enter target URL: ").strip()
-        if target:
-            if not target.startswith(('http://', 'https://')):
-                target = 'https://' + target
-            autonomous_hunt(target, args.model)
-        return
-    
-    target = args.target
-    if not target.startswith(('http://', 'https://')):
-        target = 'https://' + target
-    
-    if args.interactive:
-        autonomous_hunt(target, args.model)
+    # Get URL
+    if args.url:
+        url = args.url
     else:
-        # Quick mode with warning
-        quick_mode(target, args.output)
+        print_banner()
+        url = input("Enter target URL: ").strip()
+    
+    if not url:
+        print("[-] No URL provided")
+        sys.exit(1)
+    
+    # Ensure URL has protocol
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Start hunting
+    hunt(url, args.model)
 
 
 if __name__ == "__main__":

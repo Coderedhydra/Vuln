@@ -1,9 +1,12 @@
 """
-VulnHunter - AI-Powered Web Application Vulnerability Scanner
+VulnHunter - Autonomous AI Bug Bounty Hunter
 
-A sophisticated framework for finding security vulnerabilities in web applications
-using Ollama LLM models. Designed to be easy for AI models to use while being
-powerful enough to find critical vulnerabilities.
+Just give it a URL - the AI does everything:
+- Discovers forms, parameters, endpoints
+- Analyzes code and understands the app
+- Creates smart payloads
+- Tests and exploits vulnerabilities  
+- Reports confirmed findings
 
 Usage:
     from vulnhunter import VulnHunterLLM
@@ -12,7 +15,7 @@ Usage:
     hunter.start("https://example.com")
 
 Or via CLI:
-    python -m vulnhunter -i -t https://example.com
+    python main.py https://example.com
 """
 
 from .llm_interface import VulnHunterLLM, RealWebClient, quick_scan, manual_scan

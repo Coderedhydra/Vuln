@@ -15,7 +15,7 @@ Or via CLI:
     python -m vulnhunter -i -t https://example.com
 """
 
-from .llm_interface import VulnHunterLLM, quick_scan, manual_scan
+from .llm_interface import VulnHunterLLM, RealWebClient, quick_scan, manual_scan
 from .tools.web_tools import WebTools
 from .tools.search_tools import SearchTools
 from .tools.report_tools import ReportTools, VulnerabilityReport
@@ -27,6 +27,7 @@ __author__ = "VulnHunter Team"
 
 __all__ = [
     'VulnHunterLLM',
+    'RealWebClient',
     'quick_scan',
     'manual_scan',
     'WebTools',

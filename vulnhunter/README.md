@@ -1,137 +1,164 @@
-# VulnHunter - Fast AI-Powered Vulnerability Scanner
+# VulnHunter - Autonomous AI Bug Bounty Hunter
 
-A fast, accurate vulnerability scanner that uses async parallel requests for speed and confirms vulnerabilities before reporting.
+**This is NOT a static scanner. This is an autonomous AI security researcher.**
 
-## Features
+VulnHunter is an intelligent bug bounty hunter that thinks and acts like a human security researcher. It explores, analyzes, adapts, and confirms - never simulating or faking results.
 
-- **Ultra-Fast Scanning** - Async parallel requests, scans in seconds not minutes
-- **Accurate Detection** - Confirms vulnerabilities with actual exploitation, no false positives
-- **Smart Payloads** - Context-aware payloads that adapt to the target
-- **Data Extraction** - Proves impact by extracting data from confirmed vulnerabilities
-- **AI-Powered** - Optional LLM integration for intelligent hunting (via Ollama)
+## How It Works
+
+The AI autonomously:
+
+1. **Explores** - Fetches pages, reads source code, understands the application
+2. **Analyzes** - Identifies technologies, attack surfaces, input points
+3. **Reasons** - Creates custom payloads based on what it observes
+4. **Adapts** - Adjusts approach based on responses
+5. **Confirms** - Exploits vulnerabilities to prove they're real
+6. **Reports** - Documents only confirmed, real findings
 
 ## Quick Start
 
 ```bash
 # Install dependencies
-pip install aiohttp requests httpx rich
+pip install aiohttp requests ollama rich
 
-# Fast automatic scan (recommended)
-python main.py -t https://target.com
+# Start Ollama
+ollama serve
 
-# Scan specific parameter
-python main.py -t "https://target.com/search?q=test" -p q --type xss
+# Pull a model
+ollama pull llama3.1:8b
 
-# Interactive AI mode (requires Ollama)
+# Start autonomous hunting
 python main.py -i -t https://target.com
-
-# Save results to file
-python main.py -t https://target.com -o results.json
 ```
 
 ## Usage
 
-### Fast Automatic Scan
-The default mode scans the target for XSS, SQLi, LFI, and SSRF vulnerabilities:
+### Autonomous AI Mode (Recommended)
+
+The AI will explore and hunt autonomously:
 
 ```bash
-python main.py -t https://target.com
+python main.py -i -t https://target.com
 ```
 
-### Scan Specific Parameter
-Test a specific parameter for a vulnerability type:
+You can interact with the AI:
+- `continue` - Let it keep hunting
+- `report` - Show current findings
+- `findings` - List confirmed vulnerabilities
+- Or give specific instructions like "focus on the login form"
+
+### Different AI Models
 
 ```bash
-python main.py -t "https://target.com/page?id=1" -p id --type sqli
+# Faster, lighter model
+python main.py -i -t https://target.com -m llama3.2:3b
+
+# More capable model
+python main.py -i -t https://target.com -m llama3.1:70b
+
+# Code-focused model
+python main.py -i -t https://target.com -m codellama:7b
 ```
 
-### Interactive AI Mode
-Uses Ollama LLM for intelligent hunting:
+## What Makes This Different
 
-```bash
-# Start Ollama first
-ollama serve
+### Traditional Scanner
+- Fixed payloads
+- No understanding of context
+- High false positive rate
+- Can't adapt
+- Reports anything that "looks" vulnerable
 
-# Run interactive mode
-python main.py -i -t https://target.com -m llama3.1:8b
-```
+### VulnHunter AI
+- **Intelligent** - Understands what it's testing
+- **Adaptive** - Changes approach based on responses
+- **Context-aware** - Creates payloads specific to the target
+- **Confirming** - Proves vulnerabilities through exploitation
+- **Real** - Every request is made to the actual target, nothing is simulated
 
-## Python API
+## The AI's Tools
 
-```python
-from vulnhunter import quick_scan, VulnHunterLLM
+The AI has these tools to interact with targets:
 
-# Fast scan (no LLM needed)
-result = quick_scan("https://target.com/search?q=test")
-print(f"Found {result['vuln_count']} vulnerabilities")
-for vuln in result['vulnerabilities']:
-    print(f"  - {vuln['type']}: {vuln['payload']}")
+| Tool | Purpose |
+|------|---------|
+| `fetch(url)` | Get a URL and analyze the response |
+| `read_source(url)` | Read HTML source for code analysis |
+| `find_forms(url)` | Discover forms and input fields |
+| `find_links(url)` | Find internal links and parameters |
+| `inject(url, param, payload)` | Test a payload on a parameter |
+| `post_form(url, data)` | Submit forms with custom data |
+| `send_request(method, url, ...)` | Make any HTTP request |
+| `report_finding(...)` | Report a confirmed vulnerability |
 
-# AI-powered hunting
-hunter = VulnHunterLLM(model="llama3.1:8b")
-hunter.start("https://target.com")
-```
-
-## Detected Vulnerabilities
-
-| Type | Detection Method |
-|------|-----------------|
-| **XSS** | Payload reflection in HTML context |
-| **SQLi** | Error-based, Boolean-based, Time-based, UNION |
-| **LFI** | File content indicators (/etc/passwd, etc.) |
-| **SSRF** | Internal resource access confirmation |
-| **IDOR** | Cross-user data access |
-| **Auth Bypass** | SQL injection in login forms |
-
-## How It Works
-
-1. **Discovery** - Finds forms, parameters, and internal links
-2. **Verification** - Confirms URLs exist before testing (no dead link reports)
-3. **Testing** - Sends smart payloads in parallel for speed
-4. **Confirmation** - Verifies vulnerabilities with actual exploitation
-5. **Extraction** - Proves impact by extracting data when possible
-
-## Example Output
+## Example Session
 
 ```
 ╔═══════════════════════════════════════════════════════════════╗
-║   Fast AI-Powered Vulnerability Hunter                        ║
+║   Autonomous AI Bug Bounty Hunter                             ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-[*] Fast scanning: https://target.com/search?q=test
-[+] Scan completed in 1.23s
-[*] Forms found: 2
-[*] Parameters tested: 5
-[*] Links discovered: 12
+[*] Target: https://target.com
+[*] Initializing autonomous hunter...
+[+] AI Hunter initialized
 
-==================================================
-CONFIRMED: SQLI
-==================================================
-Severity: CRITICAL
-URL: https://target.com/search?q=test
-Parameter: q
-Payload: ' OR '1'='1
-Evidence: SQL error detected: mysql
+=== AI Hunter ===
+I'll start by exploring the target to understand its structure.
+
+TOOL: fetch(url="https://target.com")
+
+Analyzing the response... I see this is a PHP application with a 
+login form. Let me examine the form more closely.
+
+TOOL: find_forms(url="https://target.com")
+
+Found 2 forms:
+1. Login form with username/password fields
+2. Search form with 'q' parameter
+
+The search form looks interesting. Let me analyze how it handles input.
+
+TOOL: inject(url="https://target.com/search?q=test", param="q", 
+             payload="<script>alert(1)</script>")
+
+The payload is reflected in the HTML response without encoding!
+This is a confirmed XSS vulnerability.
+
+TOOL: report_finding(type="XSS", url="https://target.com/search", 
+                     param="q", payload="<script>alert(1)</script>",
+                     evidence="Payload reflected unencoded in HTML body",
+                     severity="high")
+
+Now let me test the login form for SQL injection...
+================
+
+[You] > continue
 ```
-
-## Command Line Options
-
-| Option | Description |
-|--------|-------------|
-| `-t, --target` | Target URL to scan |
-| `-p, --param` | Specific parameter to test |
-| `--type` | Vulnerability type: xss, sqli, ssrf, lfi, quick |
-| `-i, --interactive` | Interactive AI mode |
-| `-m, --model` | Ollama model (default: llama3.1:8b) |
-| `-o, --output` | Save results to JSON file |
 
 ## Requirements
 
 - Python 3.8+
-- aiohttp (for async requests)
-- requests, httpx (for HTTP)
-- rich (for pretty output)
-- ollama (optional, for AI mode)
+- Ollama (running locally)
+- An LLM model (llama3.1:8b recommended)
+
+```bash
+# Install Python packages
+pip install aiohttp requests ollama rich
+
+# Install and start Ollama
+# See: https://ollama.ai
+
+# Pull a model
+ollama pull llama3.1:8b
+```
+
+## Key Principles
+
+1. **Never Simulate** - Every request is real
+2. **Never Fake** - Every finding is confirmed through actual exploitation
+3. **Think Like a Human** - Reason about what you're seeing
+4. **Adapt** - If something doesn't work, try a different approach
+5. **Confirm** - Don't report until you have proof
 
 ## License
 

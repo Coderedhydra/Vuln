@@ -143,51 +143,52 @@ class VulnHunterLLM:
         self.system_prompt = self._build_system_prompt()
     
     def _build_system_prompt(self) -> str:
-        return """You are a security researcher finding vulnerabilities in web applications.
+        return """YOU HAVE REAL TOOLS. YOU MUST USE THEM.
 
-## YOUR TOOLS
+You are connected to real tools that make HTTP requests. When you write TOOL: command(), it ACTUALLY executes.
 
-To test vulnerabilities, call tools like this:
-TOOL: inject(url="https://example.com/search?q=test", param="q", payload="<script>alert(1)</script>")
+## YOUR REAL TOOLS - USE THEM!
 
-Available tools:
-- inject(url, param, payload) - Test a payload on a URL parameter
-- post_form(url, data) - Submit a form, data is like {"username": "admin", "password": "test"}  
-- fetch(url) - Get a page
-- report_finding(type, url, param, payload, evidence, severity) - Report confirmed vulnerability
+TOOL: inject(url="URL", param="PARAM", payload="PAYLOAD")
+- This ACTUALLY sends the payload to the real server
+- Returns real response showing if payload was reflected
 
-## PAYLOADS TO USE
+TOOL: post_form(url="URL", data={"field": "value"})
+- This ACTUALLY submits the form to the real server
 
-XSS payloads:
-- <script>alert(1)</script>
-- "><img src=x onerror=alert(1)>
-- <svg onload=alert(1)>
+TOOL: fetch(url="URL") 
+- This ACTUALLY fetches the page
 
-SQLi payloads:
-- ' (single quote - look for SQL errors)
-- ' OR '1'='1
-- ' UNION SELECT NULL--
+TOOL: report_finding(type="XSS", url="URL", param="PARAM", payload="PAYLOAD", evidence="PROOF", severity="high")
+- Use this to report CONFIRMED vulnerabilities
 
-LFI payloads:
-- ../../../etc/passwd
-- ....//....//etc/passwd
+## YOU MUST TEST - NOT TALK
 
-## HOW TO TEST
+DO NOT just describe vulnerabilities. 
+DO NOT just give recommendations.
+DO NOT say "I would need to test" - YOU CAN TEST!
 
-1. Look at the forms and parameters I give you
-2. For each input, use inject() to test payloads
-3. Check if payload is reflected (XSS) or causes errors (SQLi)
-4. If vulnerable, use report_finding() to report it
+Instead, ACTUALLY TEST by calling tools:
 
-## EXAMPLE
-
-If you see a search form with parameter "q", test it:
 TOOL: inject(url="https://target.com/search?q=test", param="q", payload="<script>alert(1)</script>")
 
-If the response shows "reflected": true, report it:
-TOOL: report_finding(type="XSS", url="https://target.com/search", param="q", payload="<script>alert(1)</script>", evidence="Payload reflected in HTML", severity="high")
+Then look at the result. If "reflected": true, it's vulnerable!
 
-Now test the parameters I give you!"""
+## PAYLOADS
+
+XSS: <script>alert(1)</script>
+SQLi: ' OR '1'='1
+LFI: ../../../etc/passwd
+
+## EXAMPLE WORKFLOW
+
+1. I give you forms/parameters
+2. You call: TOOL: inject(url="...", param="...", payload="...")
+3. You check the result
+4. If vulnerable, call: TOOL: report_finding(...)
+5. Move to next parameter
+
+START TESTING NOW. USE THE TOOLS."""
 
     def _parse_tool_calls(self, text: str) -> List[Dict]:
         """Parse tool calls from LLM response"""
@@ -556,52 +557,98 @@ Now test the parameters I give you!"""
         forms_result = self._execute_tool("find_forms", {"url": target_url})
         links_result = self._execute_tool("find_links", {"url": target_url})
         
-        return self.chat(f"""I am hunting for vulnerabilities on: {target_url}
+        # Parse forms to give specific test instructions
+        try:
+            forms_data = json.loads(forms_result)
+            forms_list = forms_data.get("forms", [])
+        except:
+            forms_list = []
+        
+        try:
+            links_data = json.loads(links_result)
+            params_list = links_data.get("parameters_found", [])
+            links_list = links_data.get("internal_links", [])
+        except:
+            params_list = []
+            links_list = []
+        
+        # Build specific test instructions
+        test_instructions = []
+        
+        for form in forms_list[:5]:
+            action = form.get("action", target_url)
+            for inp in form.get("inputs", [])[:3]:
+                name = inp.get("name", "")
+                if name:
+                    test_instructions.append(
+                        f'TOOL: inject(url="{action}?{name}=test", param="{name}", payload="<script>alert(1)</script>")'
+                    )
+        
+        for param in params_list[:5]:
+            test_instructions.append(
+                f'TOOL: inject(url="{target_url}?{param}=test", param="{param}", payload="\' OR \'1\'=\'1")'
+            )
+        
+        if not test_instructions:
+            test_instructions.append(f'TOOL: fetch(url="{target_url}")')
+        
+        tests_str = "\n".join(test_instructions[:5])
+        
+        return self.chat(f"""TARGET: {target_url}
 
-Here is what I discovered:
+I fetched the target. Here's what I found:
 
-=== FORMS FOUND ===
+=== FORMS ===
 {forms_result}
 
-=== LINKS & PARAMETERS ===
+=== PARAMETERS ===  
 {links_result}
 
-Now analyze what was found and start testing for vulnerabilities:
-- For each form input, test XSS and SQLi
-- For each URL parameter, test injection attacks
-- For file/path parameters, test LFI
-- For URL parameters, test SSRF
+NOW USE YOUR TOOLS TO TEST. Here are the commands to run:
 
-Use the inject() tool to test payloads. Example:
-TOOL: inject(url="{target_url}/page?param=test", param="param", payload="<script>alert(1)</script>")
+{tests_str}
 
-When you find a vulnerability, confirm it and report with:
-TOOL: report_finding(type="XSS", url="...", param="...", payload="...", evidence="...", severity="high")
+EXECUTE THESE TOOL COMMANDS NOW. Copy and run them.
+After each result, check if "reflected": true (XSS) or "sql_error_detected": true (SQLi).
+If vulnerable, use report_finding() to report it.
 
-Start testing now!""")
+START NOW - CALL THE TOOLS!""")
     
     def continue_hunt(self, instruction: str = "") -> str:
         """Continue hunting with optional instruction"""
         if instruction:
-            return self.chat(instruction)
-        
-        # Give context about what to test next
-        if self.discovered_forms:
-            forms_info = json.dumps(self.discovered_forms[:3], indent=2)
-            return self.chat(f"""Continue testing. Here are forms to test:
-{forms_info}
+            return self.chat(f"""{instruction}
 
-Use inject() to test each input field for XSS and SQLi. 
-Use post_form() to test login forms for auth bypass.
-Report any confirmed vulnerabilities.""")
-        
-        return self.chat(f"""Continue testing the target: {self.target_url}
-
-Use these tools to test:
-TOOL: inject(url="{self.target_url}", param="PARAM_NAME", payload="PAYLOAD")
+Remember: USE YOUR TOOLS! Call them like this:
+TOOL: inject(url="{self.target_url}/path?param=test", param="param", payload="<script>alert(1)</script>")
 TOOL: fetch(url="{self.target_url}/other-page")
 
-Test for XSS, SQLi, LFI vulnerabilities.""")
+DO NOT just describe - ACTUALLY TEST by calling tools!""")
+        
+        # Give specific test commands
+        if self.discovered_forms:
+            form = self.discovered_forms[0]
+            action = form.get("action", self.target_url)
+            inputs = form.get("inputs", [])
+            if inputs:
+                inp = inputs[0]
+                name = inp.get("name", "test")
+                return self.chat(f"""Continue testing. Run this command NOW:
+
+TOOL: inject(url="{action}?{name}=test", param="{name}", payload="<script>alert(1)</script>")
+
+Then try SQLi:
+TOOL: inject(url="{action}?{name}=test", param="{name}", payload="' OR '1'='1")
+
+EXECUTE THESE COMMANDS!""")
+        
+        return self.chat(f"""Continue testing {self.target_url}
+
+Run these commands NOW:
+TOOL: fetch(url="{self.target_url}")
+TOOL: inject(url="{self.target_url}?test=1", param="test", payload="<script>alert(1)</script>")
+
+CALL THE TOOLS!""")
     
     def get_findings(self) -> List[Dict]:
         """Get confirmed findings"""

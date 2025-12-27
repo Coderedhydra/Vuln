@@ -143,110 +143,51 @@ class VulnHunterLLM:
         self.system_prompt = self._build_system_prompt()
     
     def _build_system_prompt(self) -> str:
-        return """You are an autonomous bug bounty hunter. You work INDEPENDENTLY to find real vulnerabilities.
-
-## YOUR MISSION
-Find security vulnerabilities in the target. You must:
-1. Explore the target automatically
-2. Find ALL forms, parameters, and inputs
-3. Test each one for vulnerabilities
-4. Confirm and report real findings
-5. Keep going until you've tested everything
+        return """You are a security researcher finding vulnerabilities in web applications.
 
 ## YOUR TOOLS
 
-Call tools like this: TOOL: tool_name(param="value")
+To test vulnerabilities, call tools like this:
+TOOL: inject(url="https://example.com/search?q=test", param="q", payload="<script>alert(1)</script>")
 
-### Exploration Tools:
-- **fetch(url)** - Get a URL, see headers and body
-- **read_source(url)** - Read HTML source code  
-- **find_forms(url)** - Find all forms and inputs
-- **find_links(url)** - Find internal links and parameters
+Available tools:
+- inject(url, param, payload) - Test a payload on a URL parameter
+- post_form(url, data) - Submit a form, data is like {"username": "admin", "password": "test"}  
+- fetch(url) - Get a page
+- report_finding(type, url, param, payload, evidence, severity) - Report confirmed vulnerability
 
-### Testing Tools:
-- **inject(url, param, payload)** - Inject payload into URL parameter
-- **post_form(url, data)** - Submit form with data like {"user": "test", "pass": "123"}
-- **send_request(method, url, headers, data)** - Custom HTTP request
+## PAYLOADS TO USE
 
-### Reporting:
-- **report_finding(type, url, param, payload, evidence, severity)** - Report CONFIRMED vulnerability
+XSS payloads:
+- <script>alert(1)</script>
+- "><img src=x onerror=alert(1)>
+- <svg onload=alert(1)>
 
-## HOW TO HUNT
+SQLi payloads:
+- ' (single quote - look for SQL errors)
+- ' OR '1'='1
+- ' UNION SELECT NULL--
 
-### Step 1: Discover Attack Surface
-TOOL: find_forms(url="TARGET_URL")
-TOOL: find_links(url="TARGET_URL")
+LFI payloads:
+- ../../../etc/passwd
+- ....//....//etc/passwd
 
-### Step 2: Analyze Each Input
-For each form/parameter found:
-- What type of input is it? (search, login, id, file, url)
-- What vulnerabilities might apply?
+## HOW TO TEST
 
-### Step 3: Test With Smart Payloads
-Based on context, test:
-- **Search/text fields**: XSS payloads
-- **ID/numeric fields**: SQLi payloads  
-- **File parameters**: LFI payloads
-- **URL parameters**: SSRF payloads
-- **Login forms**: Auth bypass
+1. Look at the forms and parameters I give you
+2. For each input, use inject() to test payloads
+3. Check if payload is reflected (XSS) or causes errors (SQLi)
+4. If vulnerable, use report_finding() to report it
 
-### Step 4: Confirm & Report
-When a payload works, CONFIRM it:
-- XSS: Payload appears unencoded in HTML
-- SQLi: Error message OR data extracted
-- LFI: File contents visible (root:, [fonts], etc)
-- SSRF: Internal resource accessed
+## EXAMPLE
 
-Then report:
-TOOL: report_finding(type="XSS", url="...", param="q", payload="<script>alert(1)</script>", evidence="Reflected in HTML", severity="high")
+If you see a search form with parameter "q", test it:
+TOOL: inject(url="https://target.com/search?q=test", param="q", payload="<script>alert(1)</script>")
 
-## SMART PAYLOADS
+If the response shows "reflected": true, report it:
+TOOL: report_finding(type="XSS", url="https://target.com/search", param="q", payload="<script>alert(1)</script>", evidence="Payload reflected in HTML", severity="high")
 
-### XSS (Cross-Site Scripting)
-- `<script>alert(1)</script>`
-- `"><img src=x onerror=alert(1)>`
-- `'-alert(1)-'`
-- `<svg onload=alert(1)>`
-
-### SQLi (SQL Injection)
-- `'` (single quote - check for errors)
-- `' OR '1'='1`
-- `' OR 1=1--`
-- `' UNION SELECT NULL,NULL--`
-- `1 AND 1=1` vs `1 AND 1=2` (boolean)
-
-### LFI (Local File Inclusion)
-- `../../../etc/passwd`
-- `....//....//etc/passwd`
-- `/etc/passwd`
-
-### SSRF (Server-Side Request Forgery)
-- `http://127.0.0.1`
-- `http://localhost`
-- `http://169.254.169.254/latest/meta-data/`
-
-### Auth Bypass
-- Username: `admin' --`
-- Password: `' OR '1'='1`
-
-## IMPORTANT RULES
-
-1. **BE AUTONOMOUS** - Don't wait for instructions, keep testing
-2. **USE TOOLS** - Every test must use a real tool call
-3. **ANALYZE RESPONSES** - Read what comes back carefully
-4. **ADAPT** - If something is filtered, try bypass techniques
-5. **CONFIRM** - Only report when you have PROOF
-6. **BE THOROUGH** - Test EVERY parameter you find
-
-## START IMMEDIATELY
-
-When given a target:
-1. First, discover all forms and links
-2. Then test each parameter systematically
-3. Report any confirmed vulnerabilities
-4. Continue until everything is tested
-
-GO!"""
+Now test the parameters I give you!"""
 
     def _parse_tool_calls(self, text: str) -> List[Dict]:
         """Parse tool calls from LLM response"""
@@ -282,11 +223,13 @@ GO!"""
         
         if tool_name == "fetch":
             url = args.get("url", self.target_url)
+            if not url or url == "TARGET_URL":
+                url = self.target_url
+            
             result = self.client.get(url)
             self.explored_urls.add(url)
             
             if result["success"]:
-                # Extract useful info for the LLM
                 body = result["body"]
                 return json.dumps({
                     "url": result["url"],
@@ -297,22 +240,37 @@ GO!"""
                     "headers": {k: v for k, v in result["headers"].items() 
                                if k.lower() in ["server", "x-powered-by", "content-type", "set-cookie"]}
                 }, indent=2)
-            return json.dumps(result, indent=2)
+            
+            return json.dumps({
+                "error": f"Could not reach {url}",
+                "details": result.get("error", "Network error"),
+                "status": 0
+            }, indent=2)
         
         elif tool_name == "read_source":
             url = args.get("url", self.target_url)
+            if not url or url == "TARGET_URL":
+                url = self.target_url
+            
             result = self.client.get(url)
             
             if result["success"]:
                 return f"=== SOURCE CODE ({result['body_length']} bytes) ===\n{result['body'][:8000]}"
-            return f"Error: {result.get('error', 'Failed to fetch')}"
+            return f"Error: Could not reach {url} - {result.get('error', 'Network error')}"
         
         elif tool_name == "find_forms":
             url = args.get("url", self.target_url)
+            if not url or url == "TARGET_URL":
+                url = self.target_url
+            
             result = self.client.get(url)
             
             if not result["success"]:
-                return json.dumps({"error": result.get("error")})
+                return json.dumps({
+                    "error": f"Could not reach {url}",
+                    "details": result.get("error", "Network error"),
+                    "suggestion": "Check if the URL is correct and accessible"
+                }, indent=2)
             
             forms = self._extract_forms(result["body"], url)
             self.discovered_forms.extend(forms)
@@ -325,10 +283,17 @@ GO!"""
         
         elif tool_name == "find_links":
             url = args.get("url", self.target_url)
+            if not url or url == "TARGET_URL":
+                url = self.target_url
+            
             result = self.client.get(url)
             
             if not result["success"]:
-                return json.dumps({"error": result.get("error")})
+                return json.dumps({
+                    "error": f"Could not reach {url}",
+                    "details": result.get("error", "Network error"),
+                    "suggestion": "Check if the URL is correct and accessible"
+                }, indent=2)
             
             links = self._extract_links(result["body"], url)
             params = self._extract_params(result["body"], url)
@@ -343,11 +308,16 @@ GO!"""
         
         elif tool_name == "inject":
             url = args.get("url", self.target_url)
+            if not url or url == "TARGET_URL":
+                url = self.target_url
+            
             param = args.get("param", "")
             payload = args.get("payload", "")
             
-            if not param or not payload:
-                return json.dumps({"error": "param and payload required"})
+            if not param:
+                return json.dumps({"error": "param is required - specify which parameter to test"})
+            if not payload:
+                return json.dumps({"error": "payload is required - specify what to inject"})
             
             # Inject payload
             test_url = self._inject_param(url, param, payload)
@@ -357,17 +327,25 @@ GO!"""
                 body = result["body"]
                 reflected = payload in body
                 
+                # Check for SQL errors
+                sql_error = any(x in body.lower() for x in ["sql", "mysql", "syntax", "query", "ora-", "postgresql", "sqlite"])
+                
                 return json.dumps({
                     "url": test_url,
                     "param": param,
                     "payload": payload,
                     "status": result["status"],
                     "reflected": reflected,
+                    "sql_error_detected": sql_error,
                     "reflection_context": self._find_reflection_context(body, payload) if reflected else None,
                     "body_preview": body[:2000],
                     "body_length": len(body)
                 }, indent=2)
-            return json.dumps(result, indent=2)
+            
+            return json.dumps({
+                "error": f"Request failed to {url}",
+                "details": result.get("error", "Network error")
+            }, indent=2)
         
         elif tool_name == "post_form":
             url = args.get("url", self.target_url)
@@ -574,23 +552,56 @@ GO!"""
         self.discovered_params = set()
         self.discovered_forms = []
         
-        return self.chat(f"""TARGET: {target_url}
+        # First, automatically fetch forms and links
+        forms_result = self._execute_tool("find_forms", {"url": target_url})
+        links_result = self._execute_tool("find_links", {"url": target_url})
+        
+        return self.chat(f"""I am hunting for vulnerabilities on: {target_url}
 
-START NOW. First discover the attack surface:
+Here is what I discovered:
 
-TOOL: find_forms(url="{target_url}")
-TOOL: find_links(url="{target_url}")
+=== FORMS FOUND ===
+{forms_result}
 
-After you get results, analyze what you found and test each parameter for vulnerabilities. 
-Use XSS, SQLi, LFI, SSRF payloads as appropriate.
-Report any confirmed vulnerabilities.
-Keep going until you've tested everything.""")
+=== LINKS & PARAMETERS ===
+{links_result}
+
+Now analyze what was found and start testing for vulnerabilities:
+- For each form input, test XSS and SQLi
+- For each URL parameter, test injection attacks
+- For file/path parameters, test LFI
+- For URL parameters, test SSRF
+
+Use the inject() tool to test payloads. Example:
+TOOL: inject(url="{target_url}/page?param=test", param="param", payload="<script>alert(1)</script>")
+
+When you find a vulnerability, confirm it and report with:
+TOOL: report_finding(type="XSS", url="...", param="...", payload="...", evidence="...", severity="high")
+
+Start testing now!""")
     
     def continue_hunt(self, instruction: str = "") -> str:
         """Continue hunting with optional instruction"""
         if instruction:
             return self.chat(instruction)
-        return self.chat("Continue your security analysis. What have you found so far? What will you test next?")
+        
+        # Give context about what to test next
+        if self.discovered_forms:
+            forms_info = json.dumps(self.discovered_forms[:3], indent=2)
+            return self.chat(f"""Continue testing. Here are forms to test:
+{forms_info}
+
+Use inject() to test each input field for XSS and SQLi. 
+Use post_form() to test login forms for auth bypass.
+Report any confirmed vulnerabilities.""")
+        
+        return self.chat(f"""Continue testing the target: {self.target_url}
+
+Use these tools to test:
+TOOL: inject(url="{self.target_url}", param="PARAM_NAME", payload="PAYLOAD")
+TOOL: fetch(url="{self.target_url}/other-page")
+
+Test for XSS, SQLi, LFI vulnerabilities.""")
     
     def get_findings(self) -> List[Dict]:
         """Get confirmed findings"""

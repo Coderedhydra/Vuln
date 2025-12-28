@@ -106,13 +106,13 @@ class IDORScanner:
             
             if analysis["vulnerable"]:
                 results.append(IDORResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     resource_type=analysis["resource_type"],
                     original_id=current_id,
                     tested_id=test_id,
                     description=analysis["description"],
-                    evidence=analysis["evidence"],
-                    severity=analysis["severity"]
+                    evidence=f"Hypothesis only: {analysis['evidence']} (requires multi-session control to confirm)",
+                    severity="info"
                 ))
         
         return results
@@ -192,32 +192,32 @@ class IDORScanner:
                 new_emails = set(features.get("emails", []))
                 
                 if new_emails and new_emails != baseline_emails:
-                    result["vulnerable"] = True
+                    result["vulnerable"] = False
                     result["resource_type"] = "user_data"
-                    result["description"] = "Accessed different user's email addresses"
-                    result["evidence"] = f"Found emails: {list(new_emails)[:3]}"
-                    result["severity"] = "high"
+                    result["description"] = "Hypothesis: response contains different user's email addresses"
+                    result["evidence"] = f"Different emails observed: {list(new_emails)[:3]}"
+                    result["severity"] = "info"
                     return result
                 
                 # Check if response is significantly different but valid
                 length_diff = abs(features["length"] - baseline_features["length"])
                 if length_diff > 100 and features["length"] > 50:
-                    result["vulnerable"] = True
+                    result["vulnerable"] = False
                     result["resource_type"] = "unknown"
-                    result["description"] = "Accessed different resource"
-                    result["evidence"] = f"Response differs by {length_diff} bytes"
-                    result["severity"] = "medium"
+                    result["description"] = "Hypothesis: accessed different resource (length differs)"
+                    result["evidence"] = f"Length differs by {length_diff} bytes (not proof)"
+                    result["severity"] = "info"
                     return result
                 
                 # Check for sensitive data patterns
                 for pattern_key in self.sensitive_patterns.keys():
                     found_key = pattern_key + "_found"
                     if features.get(found_key) and not baseline_features.get(found_key):
-                        result["vulnerable"] = True
+                        result["vulnerable"] = False
                         result["resource_type"] = pattern_key
-                        result["description"] = f"Accessed {pattern_key} from different resource"
-                        result["evidence"] = f"Found: {features[found_key][:2]}"
-                        result["severity"] = "high"
+                        result["description"] = f"Hypothesis: accessed {pattern_key} from different resource"
+                        result["evidence"] = f"Observed: {features[found_key][:2]} (not proof)"
+                        result["severity"] = "info"
                         return result
         
         return result
@@ -253,13 +253,13 @@ class IDORScanner:
                 # Different content = IDOR
                 if features.get("emails") != base_features.get("emails"):
                     results.append(IDORResult(
-                        vulnerable=True,
+                        vulnerable=False,
                         resource_type="user_data",
                         original_id=base_id,
                         tested_id=test_id,
-                        description="Sequential ID enumeration reveals different users",
-                        evidence=f"Different emails found at ID {test_id}",
-                        severity="high"
+                        description="Hypothesis: sequential ID enumeration reveals different users",
+                        evidence=f"Different emails observed at ID {test_id} (not proof; requires multi-session control)",
+                        severity="info"
                     ))
         
         return results
@@ -292,13 +292,13 @@ class IDORScanner:
             if not other_features["has_error"]:
                 if abs(owner_features["length"] - other_features["length"]) < owner_features["length"] * 0.2:
                     return IDORResult(
-                        vulnerable=True,
+                        vulnerable=False,
                         resource_type="cross_user_access",
                         original_id=resource_id,
                         tested_id=resource_id,
-                        description="Different user can access resource",
-                        evidence="User 2 accessed User 1's resource",
-                        severity="critical"
+                        description="Hypothesis: different user can access resource",
+                        evidence="Requires deterministic control session proof before confirmation",
+                        severity="info"
                     )
         
         return IDORResult(

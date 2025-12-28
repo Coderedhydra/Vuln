@@ -282,12 +282,12 @@ class WebTools:
                         
                         if in_html or not_json:
                             result = ScanResult(
-                                vulnerable=True,
+                                vulnerable=False,
                                 vuln_type="XSS",
                                 url=url,
                                 param=param,
                                 payload=payload,
-                                evidence="Payload reflected in HTML",
+                                evidence="Hypothesis only: payload reflected in HTML (not proof of exploitability)",
                                 severity="high"
                             )
                             results.append(result)
@@ -318,12 +318,12 @@ class WebTools:
                         for pattern in patterns:
                             if pattern in body_lower:
                                 result = ScanResult(
-                                    vulnerable=True,
+                                    vulnerable=False,
                                     vuln_type="SQLi",
                                     url=url,
                                     param=param,
                                     payload=payload,
-                                    evidence=f"SQL error: {pattern}",
+                                    evidence=f"Hypothesis only: SQL error string '{pattern}' observed (not proof of exploitability)",
                                     severity="critical"
                                 )
                                 results.append(result)
@@ -362,12 +362,12 @@ class WebTools:
                         for pattern in patterns:
                             if pattern.lower() in body_lower and pattern.lower() not in baseline.lower():
                                 result = ScanResult(
-                                    vulnerable=True,
+                                    vulnerable=False,
                                     vuln_type="SSRF",
                                     url=url,
                                     param=param,
                                     payload=payload,
-                                    evidence=f"Internal resource: {pattern}",
+                                    evidence=f"Hypothesis only: internal-looking marker '{pattern}' observed (not proof of SSRF)",
                                     severity="critical"
                                 )
                                 results.append(result)
@@ -396,12 +396,12 @@ class WebTools:
                         for pattern in patterns:
                             if pattern in body:
                                 result = ScanResult(
-                                    vulnerable=True,
+                                    vulnerable=False,
                                     vuln_type="LFI",
                                     url=url,
                                     param=param,
                                     payload=payload,
-                                    evidence=f"File indicator: {pattern}",
+                                    evidence=f"Hypothesis only: file marker '{pattern}' observed (not proof of exploitability)",
                                     severity="critical",
                                     extracted_data=body[:500]
                                 )
@@ -427,17 +427,17 @@ class WebTools:
             password_field: "' OR '1'='1"
         })
         
-        bypassed = "logout" in result.get("body", "").lower() or \
-                   "dashboard" in result.get("body", "").lower() or \
-                   "welcome" in result.get("body", "").lower()
+        # NOTE: keyword-based success detection is not valid proof.
+        bypassed = False
         
         return {
             "url": login_url,
-            "bypassed": bypassed,
+            "bypassed": False,
             "results": [{
                 "type": "SQL Auth Bypass",
                 "payload": "' OR '1'='1",
-                "vulnerable": bypassed
+                "vulnerable": False,
+                "note": "Hypothesis only: auth bypass requires deterministic proof (e.g., access to a privileged-only endpoint with control session).",
             }]
         }
 
@@ -462,8 +462,8 @@ class WebTools:
                     "type": "IDOR",
                     "param": param,
                     "tested_id": test_id,
-                    "vulnerable": True,
-                    "evidence": "Other user data accessible"
+                    "vulnerable": False,
+                    "evidence": "Hypothesis only: response looked valid for alternate ID (not proof; requires multi-session control)"
                 })
         
         return {

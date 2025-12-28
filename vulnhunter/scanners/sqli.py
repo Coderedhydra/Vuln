@@ -296,12 +296,12 @@ class SQLiScanner:
             
             if error_info["has_error"]:
                 results.append(SQLiResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     payload=payload,
                     injection_type="error_based",
-                    evidence=error_info["error_snippet"],
+                    evidence="Hypothesis only: SQL error-like text observed (not proof of exploitability)",
                     database_type=error_info["database"],
-                    confidence="high"
+                    confidence="low"
                 ))
         
         return results
@@ -336,12 +336,12 @@ class SQLiScanner:
             
             if diff_ratio > 0.1 or (true_resp.status_code != false_resp.status_code):
                 results.append(SQLiResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     payload=f"TRUE: {true_payload} | FALSE: {false_payload}",
                     injection_type="boolean_based",
-                    evidence=f"True response: {true_len} bytes, False response: {false_len} bytes, Diff: {diff_ratio:.2%}",
+                    evidence="Hypothesis only: response differences observed (not proof per confirmation rules)",
                     database_type="unknown",
-                    confidence="medium"
+                    confidence="low"
                 ))
         
         return results
@@ -365,12 +365,12 @@ class SQLiScanner:
                 # Check if response was delayed
                 if elapsed > baseline_time + delay - 1:  # Allow 1 second tolerance
                     results.append(SQLiResult(
-                        vulnerable=True,
+                        vulnerable=False,
                         payload=payload,
                         injection_type="time_based_blind",
-                        evidence=f"Response delayed by {elapsed - baseline_time:.2f} seconds",
+                        evidence="Hypothesis only: request appeared slower; confirm via multi-sample timing + zero-delay control",
                         database_type=db_type if db_type != "generic" else "unknown",
-                        confidence="high"
+                        confidence="low"
                     ))
         
         return results
@@ -392,12 +392,12 @@ class SQLiScanner:
             
             if response.status_code == 200 and "NULL" not in response.body.lower():
                 results.append(SQLiResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     payload=payload,
                     injection_type="union_based",
-                    evidence=f"UNION injection with {column_count} columns",
+                    evidence="Hypothesis only: UNION-like behavior suspected (not proof per confirmation rules)",
                     database_type=self.detect_database(response),
-                    confidence="high"
+                    confidence="low"
                 ))
         
         return results

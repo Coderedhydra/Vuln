@@ -49,7 +49,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "vulnhunter=vulnhunter.main:main",
+            "vulnhunter=vulnhunter.cli:main",
         ],
     },
     keywords=[

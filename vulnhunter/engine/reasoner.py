@@ -1,0 +1,122 @@
+"""
+Ollama-backed reasoning engine.
+
+Strict separation:
+- This module may propose hypotheses and payload ideas.
+- It must never claim a vulnerability is confirmed (no "evidence from the web").
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Dict, List, Optional, Tuple
+
+from .models import Hypothesis, ProofKind
+
+try:
+    import ollama  # type: ignore
+
+    OLLAMA_AVAILABLE = True
+except Exception:
+    OLLAMA_AVAILABLE = False
+
+
+class Reasoner:
+    def __init__(self, model: str):
+        self.model = model
+        self.last_error: Optional[str] = None
+
+    def _extract_json(self, text: str) -> str:
+        """
+        Best-effort extraction of a top-level JSON object from model output.
+
+        Some models wrap JSON in Markdown fences or add pre/post text; we only want the object.
+        """
+        s = text.strip()
+        if s.startswith("```"):
+            # Strip Markdown code fences
+            lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+            s = "\n".join(lines).strip()
+
+        start = s.find("{")
+        end = s.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return s
+        return s[start : end + 1]
+
+    def propose_hypotheses(
+        self,
+        target_url: str,
+        crawl_summary: Dict[str, Any],
+        max_hypotheses: int = 25,
+    ) -> List[Hypothesis]:
+        """
+        Return hypotheses as structured JSON parsed into dataclasses.
+
+        If Ollama is unavailable or the model returns invalid JSON, fall back to a
+        safe empty list (the scanner can still run deterministic verifiers).
+        """
+        self.last_error = None
+        if not OLLAMA_AVAILABLE:
+            self.last_error = "ollama_python_package_unavailable"
+            return []
+
+        prompt = f"""
+You are a security analyst. You DO NOT run requests and you DO NOT claim confirmation.
+Your job is to propose vulnerability hypotheses and what proof would be required to confirm them.
+
+Target: {target_url}
+Crawl summary (JSON):
+{json.dumps(crawl_summary, indent=2)[:12000]}
+
+Rules:
+- Never claim a vulnerability is confirmed.
+- Do NOT use keyword heuristics as "proof".
+- Confirmation requires a proof signal like OOB callback or statistically significant timing delay.
+
+Return ONLY valid JSON with this schema:
+{{
+  "hypotheses": [
+    {{
+      "vuln_type": "sqli|ssrf|xss|lfi|idor|auth|other",
+      "target_url": "<url to test>",
+      "parameter": "<parameter name>",
+      "rationale": "<short>",
+      "payload_ideas": ["..."],
+      "required_proof": ["timing"|"oob"]
+    }}
+  ]
+}}
+
+Keep it concise. Provide at most {max_hypotheses} hypotheses.
+"""
+
+        try:
+            resp = ollama.chat(model=self.model, messages=[{"role": "user", "content": prompt}])
+            content = resp["message"]["content"]
+            data = json.loads(self._extract_json(content))
+        except Exception as e:
+            self.last_error = f"ollama_failed_or_invalid_json: {e}"
+            return []
+
+        out: List[Hypothesis] = []
+        for item in (data.get("hypotheses") or [])[:max_hypotheses]:
+            required = []
+            for k in item.get("required_proof") or []:
+                if k == "timing":
+                    required.append(ProofKind.TIMING)
+                elif k == "oob":
+                    required.append(ProofKind.OOB)
+            out.append(
+                Hypothesis(
+                    vuln_type=str(item.get("vuln_type") or "other"),
+                    target_url=str(item.get("target_url") or target_url),
+                    parameter=str(item.get("parameter") or ""),
+                    rationale=str(item.get("rationale") or ""),
+                    payload_ideas=[str(p) for p in (item.get("payload_ideas") or [])][:10],
+                    required_proof=required,
+                )
+            )
+
+        return [h for h in out if h.parameter]
+

@@ -1,103 +1,118 @@
 # VulnHunter - Autonomous AI Bug Bounty Hunter
 
-**Just give it a URL - the AI automatically tests for vulnerabilities.**
+Fast, automated vulnerability scanner with AI analysis.
+
+## Features
+
+- **Model Selection** - Shows available Ollama models, you pick one
+- **Parallel Testing** - Tests multiple payloads simultaneously  
+- **Automatic Discovery** - Finds forms, parameters, links automatically
+- **Confirmation** - Only reports vulnerabilities with real evidence
+- **AI Analysis** - LLM analyzes results and provides recommendations
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 pip install aiohttp requests ollama rich
 
-# 2. Start Ollama and pull any model
+# Start Ollama
 ollama serve
-ollama pull llama3.1:8b    # or any model you prefer
+ollama pull llama3.1:8b
 
-# 3. Hunt!
-python main.py https://target.com
+# Run
+python main.py
 ```
 
 ## Usage
 
 ```bash
-# Default model (llama3.1:8b)
-python main.py https://target.com
+# Interactive mode (prompts for URL and model)
+python main.py
 
-# Any Ollama model works
-python main.py https://target.com -m llama3.1:70b
-python main.py https://target.com -m codellama:7b
-python main.py https://target.com -m mixtral:8x7b
-python main.py https://target.com -m qwen2:7b
-python main.py https://target.com -m phi3:medium
-python main.py https://target.com -m gemma2:9b
+# Or provide URL directly
+python main.py https://target.com
 ```
 
 ## How It Works
 
-1. **You provide URL** → `python main.py https://target.com`
-2. **Tool automatically fetches** forms, parameters, links
-3. **AI receives the data** and sees what to test
-4. **AI uses tools** to inject payloads and test vulnerabilities
-5. **AI confirms** vulnerabilities before reporting
+1. **Enter URL** → You provide the target
+2. **Select Model** → Shows all available Ollama models
+3. **Discovery** → Automatically finds forms, parameters, links
+4. **Parallel Testing** → Tests XSS, SQLi, LFI, SSRF in parallel
+5. **Confirmation** → Only reports vulnerabilities with evidence
+6. **AI Analysis** → LLM analyzes and provides recommendations
 
-## The AI Has Real Tools
-
-The AI can actually:
-- `fetch(url)` - Fetch any page
-- `inject(url, param, payload)` - Test payloads on parameters
-- `post_form(url, data)` - Submit forms
-- `report_finding(...)` - Report confirmed vulnerabilities
-
-Every tool call makes a REAL HTTP request to the target.
-
-## Commands During Hunt
+## Output Example
 
 ```
-> c          # Continue testing
-> r          # Show report  
-> f          # Show confirmed findings
-> q          # Quit
+Target: https://target.com
+Model: llama3.1:8b
 
-# Or give specific instructions:
-> test the login form for SQL injection
-> check the search parameter for XSS
-> try to exploit that IDOR vulnerability
+Phase 1: Discovering attack surface...
+✓ Found 3 forms
+✓ Found 5 parameters
+✓ Found 12 internal links
+
+Forms:
+  • POST /login - inputs: username, password
+  • GET /search - inputs: q
+
+Parameters: q, id, page, sort, filter
+
+Phase 2: Testing for vulnerabilities (parallel)...
+Testing q...
+Testing id...
+✓ Tested 5 parameters
+✓ Found 2 potential vulnerabilities
+
+CONFIRMED VULNERABILITIES:
+  • XSS: q - Payload reflected in HTML
+  • SQLI: id - SQL error: mysql
+
+Phase 3: AI Analysis...
+╭─────────────────────────────────────────────────────╮
+│ 🔍 AI Analysis                                      │
+│                                                     │
+│ Found 2 critical vulnerabilities:                   │
+│                                                     │
+│ 1. XSS in search parameter - allows script          │
+│    injection, could steal sessions                  │
+│                                                     │
+│ 2. SQL injection in id parameter - could           │
+│    expose database contents                         │
+│                                                     │
+│ Recommendations:                                    │
+│ - Input validation on all parameters               │
+│ - Use parameterized queries                        │
+│ - Implement CSP headers                            │
+╰─────────────────────────────────────────────────────╯
+
+Commands: 'test <param>', 'report', 'quit'
 ```
 
-## Example Session
+## Commands During Session
 
-```
-$ python main.py https://target.com
+- `test <param>` - Test a specific parameter
+- `report` or `r` - Show full report
+- `quit` or `q` - Exit and show report
+- Any text - Ask the AI a question
 
-[*] Target: https://target.com
-[*] Model: llama3.1:8b
-[+] AI Hunter ready
+## Vulnerability Types
 
-🔍 AI Hunter
-═══════════════════════════════════════════
-I found 2 forms with these parameters:
-- search form: q parameter
-- login form: username, password
-
-Let me test the search parameter for XSS:
-
-TOOL: inject(url="https://target.com/search?q=test", param="q", payload="<script>alert(1)</script>")
-
-Result: reflected: true - the payload appears in the response!
-
-TOOL: report_finding(type="XSS", url="https://target.com/search", param="q", payload="<script>alert(1)</script>", evidence="Payload reflected unencoded", severity="high")
-
-Now testing login for SQLi...
-═══════════════════════════════════════════
-
-> c
-(continues testing...)
-```
+| Type | Payloads | Detection |
+|------|----------|-----------|
+| XSS | `<script>alert(1)</script>` | Payload in HTML response |
+| SQLi | `' OR '1'='1` | SQL error messages |
+| LFI | `../../../etc/passwd` | File content (root:) |
+| SSRF | `http://169.254.169.254/` | AWS metadata |
 
 ## Requirements
 
 - Python 3.8+
-- Ollama running locally with any model
-- `pip install aiohttp requests ollama rich`
+- aiohttp, requests
+- ollama (+ running Ollama server)
+- rich (optional, for pretty output)
 
 ## License
 

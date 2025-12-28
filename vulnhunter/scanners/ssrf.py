@@ -222,35 +222,35 @@ class SSRFScanner:
         if "169.254.169.254" in payload or source == "aws":
             for indicator in self.ssrf_indicators["aws_meta"]:
                 if indicator in body:
-                    result["vulnerable"] = True
-                    result["type"] = "full_read"
-                    result["evidence"] = f"AWS metadata indicator: {indicator}"
-                    result["confidence"] = "high"
+                    result["vulnerable"] = False
+                    result["type"] = "hypothesis_full_read"
+                    result["evidence"] = f"Hypothesis only: AWS metadata-like indicator '{indicator}' observed (not proof)"
+                    result["confidence"] = "low"
                     return result
         
         # Check for internal file read
         for indicator in self.ssrf_indicators["internal"]:
             if indicator in body:
-                result["vulnerable"] = True
-                result["type"] = "file_read"
-                result["evidence"] = f"Internal content indicator: {indicator}"
-                result["confidence"] = "high"
+                result["vulnerable"] = False
+                result["type"] = "hypothesis_file_read"
+                result["evidence"] = f"Hypothesis only: internal marker '{indicator}' observed (not proof)"
+                result["confidence"] = "low"
                 return result
         
         # Check for error messages that reveal SSRF
         for indicator in self.ssrf_indicators["error"]:
             if indicator in body:
-                result["vulnerable"] = True
-                result["type"] = "partial"
-                result["evidence"] = f"Error reveals internal request: {indicator}"
-                result["confidence"] = "medium"
+                result["vulnerable"] = False
+                result["type"] = "hypothesis_partial"
+                result["evidence"] = f"Hypothesis only: error string '{indicator}' may indicate attempted fetch (not proof)"
+                result["confidence"] = "low"
                 return result
         
         # Check response timing for blind SSRF
         if response.elapsed_ms > 5000:  # 5 second delay
-            result["vulnerable"] = True
-            result["type"] = "blind"
-            result["evidence"] = f"Response delayed ({response.elapsed_ms}ms) - possible blind SSRF"
+            result["vulnerable"] = False
+            result["type"] = "hypothesis_blind"
+            result["evidence"] = f"Hypothesis only: response delayed ({response.elapsed_ms}ms); confirm via OOB collaborator"
             result["confidence"] = "low"
             return result
         

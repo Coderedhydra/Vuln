@@ -267,7 +267,7 @@ class XSSScanner:
                     snippet = response.body[start:end]
             
             result = XSSResult(
-                vulnerable=executed,
+                vulnerable=False,
                 payload=payload,
                 context=context,
                 reflected=reflected,
@@ -318,7 +318,7 @@ class XSSScanner:
                 confidence = "high"
             
             results.append(XSSResult(
-                vulnerable=executed,
+                vulnerable=False,
                 payload=payload,
                 context=context,
                 reflected=reflected,

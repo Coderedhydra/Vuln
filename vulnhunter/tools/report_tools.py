@@ -18,6 +18,8 @@ class VulnerabilityReport:
     url: str
     parameter: str = ""
     payload: str = ""
+    proof_signal: str = ""
+    control_test: str = ""
     description: str = ""
     impact: str = ""
     steps_to_reproduce: List[str] = field(default_factory=list)
@@ -35,6 +37,8 @@ class VulnerabilityReport:
             "url": self.url,
             "parameter": self.parameter,
             "payload": self.payload,
+            "proof_signal": self.proof_signal,
+            "control_test": self.control_test,
             "description": self.description,
             "impact": self.impact,
             "steps_to_reproduce": self.steps_to_reproduce,
@@ -70,6 +74,12 @@ class VulnerabilityReport:
 ```
 {self.payload}
 ```
+
+## Proof Signal (required for confirmed findings)
+{self.proof_signal or "[Not provided]"}
+
+## Control Test (required for confirmed findings)
+{self.control_test or "[Not provided]"}
 
 ## Proof of Concept
 {self.proof_of_concept}

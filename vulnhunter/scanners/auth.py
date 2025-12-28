@@ -122,11 +122,11 @@ class AuthScanner:
             
             if self._check_auth_success(response):
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="sqli_auth_bypass",
                     description="SQL injection authentication bypass",
-                    evidence=f"Bypass successful with payload: {payload}",
-                    severity="critical"
+                    evidence="Hypothesis only: apparent login success was inferred from response keywords/redirects (not proof).",
+                    severity="info"
                 ))
         
         # Test default credentials
@@ -142,11 +142,11 @@ class AuthScanner:
             
             if self._check_auth_success(response):
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="default_credentials",
                     description=f"Default credentials work: {username}:{password}",
-                    evidence=f"Login successful with {username}:{password}",
-                    severity="high"
+                    evidence="Hypothesis only: apparent login success was inferred from response keywords/redirects (not proof).",
+                    severity="info"
                 ))
         
         return results
@@ -207,11 +207,11 @@ class AuthScanner:
             # Check if password was accepted
             if not self._check_password_rejected(response, password):
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="weak_password_policy",
                     description=f"Weak password accepted: {weakness}",
-                    evidence=f"Password '{password}' was accepted",
-                    severity="medium"
+                    evidence="Hypothesis only: password acceptance inferred from response text; confirm by deterministic account creation + login control.",
+                    severity="info"
                 ))
         
         return results
@@ -244,31 +244,31 @@ class AuthScanner:
             # (This is a limitation - we can see it, so it's accessible to JS)
             if "session" in name.lower() or "sess" in name.lower():
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="session_exposed",
                     description="Session cookie accessible to JavaScript",
-                    evidence=f"Session cookie '{name}' can be read",
-                    severity="medium"
+                    evidence="Hypothesis only: cookie flags cannot be inferred reliably here; confirm by inspecting Set-Cookie attributes.",
+                    severity="info"
                 ))
             
             # Check for predictable session IDs
             if self._is_predictable_session(value):
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="predictable_session",
                     description="Session ID appears predictable",
-                    evidence=f"Session value: {value[:20]}...",
-                    severity="high"
+                    evidence="Hypothesis only: predictability heuristics are not proof; confirm with entropy analysis + multiple samples.",
+                    severity="info"
                 ))
             
             # Check for short session ID
             if len(value) < 20:
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="weak_session_id",
                     description="Session ID is too short",
-                    evidence=f"Session length: {len(value)} characters",
-                    severity="medium"
+                    evidence="Hypothesis only: short length is not proof; confirm with threat model + entropy analysis.",
+                    severity="info"
                 ))
         
         return results
@@ -331,11 +331,11 @@ class AuthScanner:
         
         if not blocked and not captcha_shown:
             return AuthResult(
-                vulnerable=True,
+                vulnerable=False,
                 vuln_type="no_brute_force_protection",
                 description=f"No protection after {attempts} failed attempts",
-                evidence="No rate limiting, CAPTCHA, or account lockout",
-                severity="high"
+                evidence="Hypothesis only: absence of indicators is not proof; confirm with deterministic rate-limit checks and control.",
+                severity="info"
             )
         else:
             return AuthResult(
@@ -367,22 +367,22 @@ class AuthScanner:
             # Check for none algorithm
             if header_json.get('alg', '').lower() == 'none':
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="jwt_none_algorithm",
                     description="JWT uses 'none' algorithm",
-                    evidence="Token header: alg=none",
-                    severity="critical"
+                    evidence="Hypothesis only: confirm requires forging a valid authenticated request with modified token + control.",
+                    severity="info"
                 ))
             
             # Check for weak algorithms
             weak_algs = ['hs256', 'hs384', 'hs512']
             if header_json.get('alg', '').lower() in weak_algs:
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="jwt_weak_algorithm",
                     description=f"JWT uses weak algorithm: {header_json.get('alg')}",
-                    evidence="Consider using RS256 or ES256",
-                    severity="medium"
+                    evidence="Informational: algorithm choice alone is not exploitable proof.",
+                    severity="info"
                 ))
             
             # Decode payload
@@ -394,21 +394,21 @@ class AuthScanner:
             for key in payload_json.keys():
                 if any(s in key.lower() for s in sensitive_keys):
                     results.append(AuthResult(
-                        vulnerable=True,
+                        vulnerable=False,
                         vuln_type="jwt_sensitive_data",
                         description=f"JWT contains sensitive data: {key}",
-                        evidence=f"Found sensitive field in payload: {key}",
-                        severity="high"
+                        evidence="Informational: sensitive claims are present (not an exploit proof).",
+                        severity="info"
                     ))
             
             # Check for missing expiration
             if 'exp' not in payload_json:
                 results.append(AuthResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     vuln_type="jwt_no_expiration",
                     description="JWT has no expiration time",
-                    evidence="Missing 'exp' claim in payload",
-                    severity="medium"
+                    evidence="Informational: missing exp increases risk but is not exploit proof by itself.",
+                    severity="info"
                 ))
         
         except Exception as e:

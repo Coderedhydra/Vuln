@@ -160,12 +160,12 @@ class LFIScanner:
                 
                 if analysis["found"]:
                     results.append(LFIResult(
-                        vulnerable=True,
+                        vulnerable=False,
                         payload=payload,
                         vuln_type="lfi_path_traversal",
                         file_read=analysis["file"],
-                        evidence=analysis["evidence"],
-                        confidence=analysis["confidence"]
+                        evidence=f"Hypothesis only: {analysis['evidence']} (not proof per confirmation rules)",
+                        confidence="low"
                     ))
         
         return results
@@ -187,12 +187,12 @@ class LFIScanner:
                         decoded = base64.b64decode(potential_b64).decode('utf-8', errors='ignore')
                         if any(indicator in decoded.lower() for indicator in ["root:", "<?php", "password"]):
                             results.append(LFIResult(
-                                vulnerable=True,
+                                vulnerable=False,
                                 payload=payload,
                                 vuln_type="php_wrapper_lfi",
                                 file_read="base64_decoded_file",
-                                evidence=f"Base64 content decoded: {decoded[:100]}",
-                                confidence="high"
+                                evidence="Hypothesis only: base64-decoded content resembles a file; confirm with stronger proof signal/control",
+                                confidence="low"
                             ))
                     except:
                         pass
@@ -200,12 +200,12 @@ class LFIScanner:
             # Check for phpinfo output
             if "phpinfo" in payload and "PHP Version" in response.body:
                 results.append(LFIResult(
-                    vulnerable=True,
+                    vulnerable=False,
                     payload=payload,
                     vuln_type="php_wrapper_rce",
                     file_read="phpinfo",
-                    evidence="phpinfo() executed",
-                    confidence="high"
+                    evidence="Hypothesis only: phpinfo-like output observed; confirm with deterministic proof and control",
+                    confidence="low"
                 ))
         
         return results

@@ -1,118 +1,199 @@
-# VulnHunter - Autonomous AI Bug Bounty Hunter
+# VulnHunter - Full AI-Controlled Bug Bounty Framework
 
-Fast, automated vulnerability scanner with AI analysis.
+**The LLM has FULL CONTROL** - sends requests, reads responses, crafts payloads, exploits vulnerabilities.
 
 ## Features
 
-- **Model Selection** - Shows available Ollama models, you pick one
-- **Parallel Testing** - Tests multiple payloads simultaneously  
-- **Automatic Discovery** - Finds forms, parameters, links automatically
-- **Confirmation** - Only reports vulnerabilities with real evidence
-- **AI Analysis** - LLM analyzes results and provides recommendations
+- **LLM Drives Everything** - The AI decides what to test, crafts payloads, analyzes responses
+- **Real HTTP Requests** - Tools for GET, POST, custom requests
+- **Smart Discovery** - Find forms, links, endpoints, technologies
+- **Payload Injection** - Inject into URL params or POST fields
+- **Research Tools** - Search CVEs, find exploits
+- **Confirmation** - Only report after the LLM confirms with evidence
 
 ## Quick Start
 
 ```bash
 # Install dependencies
-pip install aiohttp requests ollama rich
+pip install aiohttp ollama rich
 
 # Start Ollama
 ollama serve
-ollama pull llama3.1:8b
 
 # Run
-python main.py
+python hunter.py https://target.com
 ```
 
 ## Usage
 
 ```bash
-# Interactive mode (prompts for URL and model)
-python main.py
+# Interactive mode - prompts for URL and model
+python hunter.py
 
-# Or provide URL directly
-python main.py https://target.com
+# With URL
+python hunter.py https://target.com
+
+# With specific model
+python hunter.py https://target.com -m llama3.1:8b
 ```
 
 ## How It Works
 
-1. **Enter URL** → You provide the target
-2. **Select Model** → Shows all available Ollama models
-3. **Discovery** → Automatically finds forms, parameters, links
-4. **Parallel Testing** → Tests XSS, SQLi, LFI, SSRF in parallel
-5. **Confirmation** → Only reports vulnerabilities with evidence
-6. **AI Analysis** → LLM analyzes and provides recommendations
-
-## Output Example
+The LLM calls tools directly using `[TOOL: name(args)]` syntax:
 
 ```
-Target: https://target.com
+AI: Let me start by discovering the attack surface...
+
+[TOOL: find_forms(https://target.com)]
+[TOOL: find_links(https://target.com)]
+[TOOL: detect_tech(https://target.com)]
+
+--- Results returned to AI ---
+
+AI: I found 3 forms and detected PHP/WordPress. Let me test for XSS...
+
+[TOOL: get_payloads(xss)]
+
+--- Payloads returned ---
+
+[TOOL: inject(https://target.com/search?q=test, q, <script>alert(1)</script>)]
+
+--- Response shows payload reflected ---
+
+AI: CONFIRMED XSS vulnerability! Recording...
+
+[TOOL: report(XSS, https://target.com/search, q, <script>alert(1)</script>, Reflected in HTML, high)]
+```
+
+## Available Tools
+
+### HTTP Tools
+| Tool | Description | Example |
+|------|-------------|---------|
+| `get(url)` | GET request | `[TOOL: get(https://target.com)]` |
+| `post(url, data)` | POST with JSON data | `[TOOL: post(https://target.com/login, {"user":"test"})]` |
+| `request(method, url, headers, data)` | Custom request | `[TOOL: request(PUT, https://api.com/user, {}, {"name":"x"})]` |
+
+### Discovery Tools
+| Tool | Description |
+|------|-------------|
+| `find_forms(url)` | Find all HTML forms and inputs |
+| `find_links(url)` | Find internal links and URL parameters |
+| `read_source(url)` | Read full HTML source code |
+| `find_endpoints(url)` | Find API endpoints in JavaScript |
+| `detect_tech(url)` | Detect server technologies |
+
+### Testing Tools
+| Tool | Description |
+|------|-------------|
+| `inject(url, param, payload)` | Inject payload into URL parameter |
+| `post_inject(url, data, field, payload)` | Inject into POST field |
+
+### Research Tools
+| Tool | Description |
+|------|-------------|
+| `get_payloads(type)` | Get payloads (xss, sqli, lfi, ssrf, ssti, cmd) |
+| `search_cve(technology)` | Search CVEs for a technology |
+| `search_exploit(query)` | Search for exploits |
+
+### Reporting Tools
+| Tool | Description |
+|------|-------------|
+| `report(type, url, param, payload, evidence, severity)` | Record a vulnerability |
+| `get_findings()` | List all findings |
+| `summary()` | Get full hunt summary |
+
+## Example Session
+
+```
+$ python hunter.py https://example.com -m llama3.1:8b
+
+╔═══════════════════════════════════════════════════════════════╗
+║   VulnHunter Framework - Full AI Control                      ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Target: https://example.com
 Model: llama3.1:8b
 
-Phase 1: Discovering attack surface...
-✓ Found 3 forms
-✓ Found 5 parameters
-✓ Found 12 internal links
+Starting autonomous hunt...
 
-Forms:
-  • POST /login - inputs: username, password
-  • GET /search - inputs: q
+╭─────────────────────────────────────────────────────────────────╮
+│ 🔍 AI Hunter                                                    │
+│                                                                 │
+│ Starting reconnaissance on https://example.com...               │
+│                                                                 │
+│ [TOOL: find_forms(https://example.com)]                        │
+│ [TOOL: find_links(https://example.com)]                        │
+│ [TOOL: detect_tech(https://example.com)]                       │
+│                                                                 │
+│ --- After tools execute ---                                     │
+│                                                                 │
+│ Found 2 forms with inputs: username, password, search, id      │
+│ Detected: nginx, PHP 7.4, WordPress 6.0                        │
+│                                                                 │
+│ Testing search parameter for XSS...                             │
+│ [TOOL: inject(https://example.com/?s=test, s, <script>alert(1)</script>)] │
+│                                                                 │
+│ Response shows reflected:true - VULNERABLE!                     │
+│ [TOOL: report(XSS, https://example.com/?s=test, s, <script>alert(1)</script>, Reflected in HTML, high)] │
+╰─────────────────────────────────────────────────────────────────╯
 
-Parameters: q, id, page, sort, filter
+Commands: 'c'=continue, 'r'=report, 'q'=quit
+> c
 
-Phase 2: Testing for vulnerabilities (parallel)...
-Testing q...
-Testing id...
-✓ Tested 5 parameters
-✓ Found 2 potential vulnerabilities
+╭─────────────────────────────────────────────────────────────────╮
+│ 🔍 AI Hunter                                                    │
+│                                                                 │
+│ Continuing with SQL injection tests...                          │
+│ [TOOL: inject(https://example.com/product?id=1, id, 1' OR '1'='1)] │
+│ ...                                                             │
+╰─────────────────────────────────────────────────────────────────╯
 
-CONFIRMED VULNERABILITIES:
-  • XSS: q - Payload reflected in HTML
-  • SQLI: id - SQL error: mysql
+> q
 
-Phase 3: AI Analysis...
-╭─────────────────────────────────────────────────────╮
-│ 🔍 AI Analysis                                      │
-│                                                     │
-│ Found 2 critical vulnerabilities:                   │
-│                                                     │
-│ 1. XSS in search parameter - allows script          │
-│    injection, could steal sessions                  │
-│                                                     │
-│ 2. SQL injection in id parameter - could           │
-│    expose database contents                         │
-│                                                     │
-│ Recommendations:                                    │
-│ - Input validation on all parameters               │
-│ - Use parameterized queries                        │
-│ - Implement CSP headers                            │
-╰─────────────────────────────────────────────────────╯
-
-Commands: 'test <param>', 'report', 'quit'
+=== Hunt Complete ===
+Requests made: 15
+Vulnerabilities found: 2
 ```
 
-## Commands During Session
+## Interactive Commands
 
-- `test <param>` - Test a specific parameter
-- `report` or `r` - Show full report
-- `quit` or `q` - Exit and show report
-- Any text - Ask the AI a question
+| Command | Description |
+|---------|-------------|
+| `c` or `continue` | Continue hunting automatically |
+| `r` or `report` | Show current findings |
+| `q` or `quit` | Exit and show summary |
+| Any text | Give instructions to the AI |
 
-## Vulnerability Types
+## Example Instructions
 
-| Type | Payloads | Detection |
-|------|----------|-----------|
-| XSS | `<script>alert(1)</script>` | Payload in HTML response |
-| SQLi | `' OR '1'='1` | SQL error messages |
-| LFI | `../../../etc/passwd` | File content (root:) |
-| SSRF | `http://169.254.169.254/` | AWS metadata |
+```
+> test the login form for SQL injection
+
+> try to bypass authentication
+
+> look for IDOR vulnerabilities in the user endpoint
+
+> search for CVEs related to WordPress 6.0
+
+> read the source of the admin page
+```
 
 ## Requirements
 
 - Python 3.8+
-- aiohttp, requests
-- ollama (+ running Ollama server)
-- rich (optional, for pretty output)
+- aiohttp
+- ollama (with server running)
+- rich (for pretty output)
+
+## Install
+
+```bash
+pip install -r requirements.txt
+
+# Or manually
+pip install aiohttp ollama rich
+```
 
 ## License
 

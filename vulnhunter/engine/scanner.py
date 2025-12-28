@@ -11,7 +11,7 @@ Flow:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from ..config import DEFAULT_CONFIG
@@ -81,13 +81,24 @@ class EvidenceDrivenScanner:
 
         return sorted(points)
 
-    def scan(self) -> Dict[str, Any]:
+    def scan(self, on_event: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+        def emit(msg: str) -> None:
+            if on_event:
+                on_event(msg)
+
+        emit("Starting crawl…")
         crawl_summary = self.crawler.crawl_site(self.target_url, depth=self.config.crawl_depth)
 
         injection_points = self._collect_injection_points(crawl_summary)
+        emit(f"Crawl complete. Candidate injection points: {len(injection_points)}")
 
         # Optional AI hypotheses (never used as confirmation)
+        emit(f"Requesting AI hypotheses from Ollama model '{self.config.model}'…")
         hypotheses: List[Hypothesis] = self.reasoner.propose_hypotheses(self.target_url, crawl_summary)
+        if getattr(self.reasoner, "last_error", None):
+            emit(f"AI hypotheses unavailable: {self.reasoner.last_error}")
+        else:
+            emit(f"AI hypotheses received: {len(hypotheses)}")
 
         confirmed: List[Finding] = []
         hypotheses_out: List[Finding] = []
@@ -95,14 +106,18 @@ class EvidenceDrivenScanner:
         # Deterministic verification.
         for url, param in injection_points:
             if self.config.verify_sqli_timing:
+                emit(f"Verifying SQLi (timing) for {param} @ {url}")
                 finding = self.sqli_verifier.verify(url, param)
                 if finding:
+                    emit(f"CONFIRMED (timing): sqli param={param} @ {url}")
                     confirmed.append(finding)
                     continue
 
             if self.config.verify_ssrf_oob and self.oob.enabled():
+                emit(f"Verifying SSRF (OOB) for {param} @ {url}")
                 finding = self.ssrf_verifier.verify(url, param)
                 if finding:
+                    emit(f"CONFIRMED (oob): ssrf param={param} @ {url}")
                     confirmed.append(finding)
                     continue
 
@@ -126,5 +141,11 @@ class EvidenceDrivenScanner:
             "injection_points": [{"url": u, "param": p} for (u, p) in injection_points],
             "confirmed_findings": [f.to_dict() for f in confirmed],
             "hypotheses": [f.to_dict() for f in hypotheses_out],
+            "reasoner": {
+                "model": self.config.model,
+                "ok": getattr(self.reasoner, "last_error", None) is None,
+                "error": getattr(self.reasoner, "last_error", None),
+                "hypotheses_count": len(hypotheses),
+            },
         }
 

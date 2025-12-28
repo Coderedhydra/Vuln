@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-m", "--model", default=DEFAULT_CONFIG.default_model, help="Ollama model for reasoning")
     parser.add_argument("--crawl-depth", type=int, default=DEFAULT_CONFIG.crawl_depth)
     parser.add_argument("--max-pages", type=int, default=DEFAULT_CONFIG.max_pages)
+    parser.add_argument("--chat", action="store_true", help="Print step-by-step (ChatGPT-like) progress output")
 
     parser.add_argument("--sqli-delay", type=float, default=float(DEFAULT_CONFIG.time_based_delay))
     parser.add_argument("--sqli-samples", type=int, default=3)
@@ -85,7 +86,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     scanner = EvidenceDrivenScanner(target_url=url, config=cfg)
-    result = scanner.scan()
+    if args.chat:
+        result = scanner.scan(on_event=lambda m: print(f"[scanner] {m}"))
+    else:
+        result = scanner.scan()
 
     if args.json:
         print(json.dumps(result, indent=2))

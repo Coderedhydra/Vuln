@@ -9,7 +9,7 @@ Strict separation:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import Hypothesis, ProofKind
 
@@ -24,6 +24,25 @@ except Exception:
 class Reasoner:
     def __init__(self, model: str):
         self.model = model
+        self.last_error: Optional[str] = None
+
+    def _extract_json(self, text: str) -> str:
+        """
+        Best-effort extraction of a top-level JSON object from model output.
+
+        Some models wrap JSON in Markdown fences or add pre/post text; we only want the object.
+        """
+        s = text.strip()
+        if s.startswith("```"):
+            # Strip Markdown code fences
+            lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+            s = "\n".join(lines).strip()
+
+        start = s.find("{")
+        end = s.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return s
+        return s[start : end + 1]
 
     def propose_hypotheses(
         self,
@@ -37,7 +56,9 @@ class Reasoner:
         If Ollama is unavailable or the model returns invalid JSON, fall back to a
         safe empty list (the scanner can still run deterministic verifiers).
         """
+        self.last_error = None
         if not OLLAMA_AVAILABLE:
+            self.last_error = "ollama_python_package_unavailable"
             return []
 
         prompt = f"""
@@ -73,8 +94,9 @@ Keep it concise. Provide at most {max_hypotheses} hypotheses.
         try:
             resp = ollama.chat(model=self.model, messages=[{"role": "user", "content": prompt}])
             content = resp["message"]["content"]
-            data = json.loads(content)
-        except Exception:
+            data = json.loads(self._extract_json(content))
+        except Exception as e:
+            self.last_error = f"ollama_failed_or_invalid_json: {e}"
             return []
 
         out: List[Hypothesis] = []

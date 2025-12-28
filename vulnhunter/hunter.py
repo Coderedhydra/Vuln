@@ -10,7 +10,15 @@ Use the evidence-driven CLI:
 - vulnhunter <url>
 """
 
-from .cli import main
+import os
+import sys
+
+if __package__ in (None, ""):
+    # Support: cd vulnhunter && python3 hunter.py ...
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vulnhunter.cli import main  # type: ignore
+else:
+    from .cli import main
 
 __all__ = ["main"]
 

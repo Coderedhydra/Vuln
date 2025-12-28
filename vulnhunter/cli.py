@@ -11,10 +11,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from typing import Any, Dict
 
-from .config import DEFAULT_CONFIG
-from .engine.scanner import EvidenceDrivenScanner, ScanConfig
+if __package__ in (None, ""):
+    # Allow running as a standalone script from inside the package directory:
+    #   cd vulnhunter && python3 cli.py ...
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vulnhunter.config import DEFAULT_CONFIG  # type: ignore
+    from vulnhunter.engine.scanner import EvidenceDrivenScanner, ScanConfig  # type: ignore
+else:
+    from .config import DEFAULT_CONFIG
+    from .engine.scanner import EvidenceDrivenScanner, ScanConfig
 
 
 def _print_human_summary(result: Dict[str, Any]) -> None:

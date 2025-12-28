@@ -57,6 +57,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--crawl-depth", type=int, default=DEFAULT_CONFIG.crawl_depth)
     parser.add_argument("--max-pages", type=int, default=DEFAULT_CONFIG.max_pages)
     parser.add_argument("--chat", action="store_true", help="Print step-by-step (ChatGPT-like) progress output")
+    parser.add_argument("--autopilot", action="store_true", help="Iterate multiple rounds of proof-based verification")
+    parser.add_argument("--rounds", type=int, default=3, help="Max autopilot rounds")
+    parser.add_argument("--triage-concurrency", type=int, default=25, help="Parallelism for fast triage")
+    parser.add_argument("--verify-concurrency", type=int, default=2, help="Parallelism for proof verifiers (kept low to avoid timing noise)")
+    parser.add_argument("--max-verify-per-round", type=int, default=12, help="How many prioritized targets to run proof checks on per round")
 
     parser.add_argument("--sqli-delay", type=float, default=float(DEFAULT_CONFIG.time_based_delay))
     parser.add_argument("--sqli-samples", type=int, default=3)
@@ -83,6 +88,11 @@ def main(argv: list[str] | None = None) -> None:
         sqli_samples=int(args.sqli_samples),
         oob_callback_template=args.oob_callback_template,
         oob_poll_template=args.oob_poll_template,
+        autopilot=bool(args.autopilot),
+        max_rounds=int(args.rounds),
+        triage_concurrency=int(args.triage_concurrency),
+        verify_concurrency=int(args.verify_concurrency),
+        max_verify_per_round=int(args.max_verify_per_round),
     )
 
     scanner = EvidenceDrivenScanner(target_url=url, config=cfg)

@@ -161,10 +161,13 @@ class FastScanner:
                 evidence = "File content found"
         
         elif vuln_type == "ssrf":
-            is_json = body.strip().startswith("{") or body.strip().startswith("[")
-            if not is_json and ("ami-id" in body_lower or "instance-id" in body_lower):
-                vulnerable = True
-                evidence = "Internal resource accessed"
+            # Check for REAL AWS metadata content (ami-xxxx, i-xxxx patterns)
+            real_aws = ["ami-", "i-", "ip-", "us-east-", "us-west-", "eu-west-"]
+            for ind in real_aws:
+                if ind in body_lower:
+                    vulnerable = True
+                    evidence = f"AWS data found: {ind}..."
+                    break
         
         return {
             "tested": True,

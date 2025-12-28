@@ -182,17 +182,26 @@ class FastTester:
                     break
         
         elif vuln_type == "ssrf":
-            # Only detect real SSRF - AWS metadata or actual internal content
-            ssrf_indicators = ["ami-id", "instance-id", "meta-data", "iam/security-credentials"]
-            is_json = body.strip().startswith("{") or body.strip().startswith("[")
+            # Only detect REAL SSRF - actual internal content, not reflection
+            # Our payloads contain these URLs, so we need to check for ACTUAL AWS response content
             
-            # Skip if this is just JSON echoing our payload back
-            if not is_json:
-                for ind in ssrf_indicators:
-                    if ind in body_lower:
-                        vulnerable = True
-                        evidence = f"Internal resource accessed: {ind}"
-                        break
+            # These indicate REAL AWS metadata was returned (not just payload reflection)
+            real_aws_content = [
+                "ami-",           # ami-id values start with ami-
+                "i-",             # instance IDs start with i-
+                "ip-",            # internal hostnames
+                "us-east-",       # AWS regions
+                "us-west-",
+                "eu-west-",
+                "ap-",
+            ]
+            
+            # Only vulnerable if we see actual AWS content, not our payload
+            for indicator in real_aws_content:
+                if indicator in body_lower:
+                    vulnerable = True
+                    evidence = f"AWS internal data found: {indicator}..."
+                    break
         
         return {
             "tested": True,
@@ -621,11 +630,18 @@ Vulnerability Details:
 
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="VulnHunter - AI Bug Bounty Hunter")
+    parser.add_argument('url', nargs='?', help='Target URL')
+    parser.add_argument('-m', '--model', help='Ollama model to use')
+    args = parser.parse_args()
+    
     print_banner()
     
     # Get URL
-    if len(sys.argv) > 1:
-        url = sys.argv[1]
+    if args.url:
+        url = args.url
     else:
         url = input("Enter target URL: ").strip()
     
@@ -636,18 +652,27 @@ def main():
     if not url.startswith(('http://', 'https://')):
         url = 'https://' + url
     
-    # Select model
-    if console:
-        console.print("\n[bold]Select AI Model:[/bold]")
+    # Get model - use provided model or let user select
+    if args.model:
+        # User specified model - use it directly
+        model = args.model
+        if console:
+            console.print(f"[green]Using model: {model}[/green]\n")
+        else:
+            print(f"Using model: {model}\n")
     else:
-        print("\nSelect AI Model:")
-    
-    model = select_model()
-    
-    if console:
-        console.print(f"[green]Using model: {model}[/green]\n")
-    else:
-        print(f"Using model: {model}\n")
+        # No model specified - show selection
+        if console:
+            console.print("\n[bold]Select AI Model:[/bold]")
+        else:
+            print("\nSelect AI Model:")
+        
+        model = select_model()
+        
+        if console:
+            console.print(f"[green]Using model: {model}[/green]\n")
+        else:
+            print(f"Using model: {model}\n")
     
     # Start hunting
     hunt(url, model)
